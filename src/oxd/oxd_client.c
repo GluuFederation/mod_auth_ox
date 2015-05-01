@@ -99,19 +99,21 @@ static apr_status_t do_client_task(apr_socket_t *sock, const char *req_str, char
 		}
 	}
 	rv = apr_socket_recv(sock, resp, &len);
+	resp[len] = 0;
 
 	return rv;
 }
 
-int oxd_discovery(const char *hostname, int portnum, const char *discovery_url, char *resp_str)
+apr_byte_t oxd_discovery(const char *hostname, int portnum, const char *discovery_url, char *result)
 {
     apr_status_t rv;
     apr_pool_t *mp;
     apr_socket_t *s;
 	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
  
     if ((discovery_url == NULL) || (hostname == NULL) || (portnum < 0)) {
-        return -1;
+        return FALSE;
     }
     
     apr_initialize();
@@ -131,28 +133,37 @@ int oxd_discovery(const char *hostname, int portnum, const char *discovery_url, 
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';
 
-    rv = do_client_task(s, req, resp_str);
+	rv = do_client_task(s, req, resp);
     if (rv != APR_SUCCESS) {
         goto error;
     }
     apr_socket_close(s);
+
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
     
     apr_terminate();
-    return 0;
+    return TRUE;
 
  error:
     apr_terminate();
-    return -1;
+    return FALSE;
 }
 
-int oxd_register_client(const char *hostname, int portnum, \
+apr_byte_t oxd_register_client(const char *hostname, int portnum, \
 				  const char *discovery_url, const char *redirect_url, const char *logout_redirect_url, \
-				  const char *client_name, char *resp_str)
+				  const char *client_name, char *result)
 {
 	apr_status_t rv;
 	apr_pool_t *mp;
 	apr_socket_t *s;
 	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
 
 	if ((discovery_url == NULL) || 
 		(redirect_url == NULL) || 
@@ -160,7 +171,7 @@ int oxd_register_client(const char *hostname, int portnum, \
 		(client_name == NULL) || 
 		(hostname == NULL) || 
 		(portnum < 0)) {
-		return -1;
+		return FALSE;
 	}
 
 	apr_initialize();
@@ -186,18 +197,26 @@ int oxd_register_client(const char *hostname, int portnum, \
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';
 
-	rv = do_client_task(s, req, resp_str);
+	rv = do_client_task(s, req, resp);
 	if (rv != APR_SUCCESS) {
 		goto error;
 	}
 	apr_socket_close(s);
 
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
 	apr_terminate();
-	return 0;
+	return TRUE;
 
 error:
 	apr_terminate();
-	return -1;
+	return FALSE;
 }
 
 int oxd_obtain_pat(const char *hostname, int portnum, \

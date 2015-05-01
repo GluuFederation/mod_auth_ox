@@ -28,8 +28,8 @@
 #ifndef __OXD_CLIENT_H_
 #define __OXD_CLIENT_H_
 
-int oxd_discovery(const char *hostname, int portnum, const char *discovery_url, char *resp_str);
-int oxd_register_client(const char *hostname, int portnum, const char *discovery_url, const char *redirect_url, const char *logout_redirect_url, const char *client_name, char *resp_str);
+apr_byte_t oxd_discovery(const char *hostname, int portnum, const char *discovery_url, char *result);
+apr_byte_t oxd_register_client(const char *hostname, int portnum, const char *discovery_url, const char *redirect_url, const char *logout_redirect_url, const char *client_name, char *result);
 int oxd_obtain_pat(const char *hostname, int portnum, const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, char *resp_str);
 int oxd_obtain_aat(const char *hostname, int portnum, const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, char *resp_str);
 int oxd_obtain_rpt(const char *hostname, int portnum, const char *aat_token, const char *am_host, char *resp_str);

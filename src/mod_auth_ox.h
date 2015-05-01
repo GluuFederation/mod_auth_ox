@@ -224,6 +224,12 @@ typedef struct ox_provider_t {
 	char *userinfo_signed_response_alg;
 	char *userinfo_encrypted_response_alg;
 	char *userinfo_encrypted_response_enc;
+
+	// gluu oxd support
+	char *openid_provider;
+	char *oxd_hostaddr;
+	int oxd_portnum;
+	char *logout_url;
 } ox_provider_t ;
 
 typedef struct ox_remote_user_claim_t {

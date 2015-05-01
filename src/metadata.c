@@ -59,6 +59,7 @@
 #include <http_log.h>
 
 #include "mod_auth_ox.h"
+#include "oxd/oxd_client.h"
 
 #ifdef WIN32
 extern "C" module AP_MODULE_DECLARE_DATA auth_ox_module;
@@ -759,18 +760,43 @@ apr_byte_t ox_metadata_jwks_get(request_rec *r, ox_cfg *cfg,
  */
 apr_byte_t ox_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
 		const char *issuer, const char *url, json_t **j_metadata,
-		const char **response) {
+		const char **response) 
+{
+	char resp_str[8192];
 
 	/* get a handle to the directory config */
 	ox_dir_cfg *dir_cfg = (ox_dir_cfg *)ap_get_module_config(r->per_dir_config,
 			&auth_ox_module);
 
 	/* get provider metadata from the specified URL with the specified parameters */
-	if (ox_util_http_get(r, url, NULL, NULL, NULL,
-			cfg->provider.ssl_validate_server, response,
-			cfg->http_timeout_short, cfg->outgoing_proxy,
-			dir_cfg->pass_cookies) == FALSE)
+// 	if (ox_util_http_get(r, url, NULL, NULL, NULL,
+// 			cfg->provider.ssl_validate_server, response,
+// 			cfg->http_timeout_short, cfg->outgoing_proxy,
+// 			dir_cfg->pass_cookies) == FALSE)
+// 		return FALSE;
+
+	if (oxd_discovery(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, 
+		cfg->provider.openid_provider, resp_str) != FALSE) 
+	{
+		(*response) = (char *)malloc(strlen(resp_str)+1);
+		memcpy((void *)(*response), resp_str, strlen(resp_str));
+		((char *)(*response))[strlen(resp_str)] = 0;
+
+		json_t *j_clientinfo;
+		oxd_register_client(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum,
+			cfg->provider.openid_provider, cfg->redirect_uri, cfg->provider.logout_url, cfg->provider.client_name, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (cfg->provider.client_id == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_id", &cfg->provider.client_id, NULL);
+		if (cfg->provider.client_secret == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_secret", &cfg->provider.client_secret, NULL);
+		json_decref(j_clientinfo);
+	}
+	else 
+	{
 		return FALSE;
+	}
 
 	/* decode and see if it is not an error response somehow */
 	if (ox_util_decode_json_and_check_error(r, *response, j_metadata) == FALSE)

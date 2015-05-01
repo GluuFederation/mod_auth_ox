@@ -757,6 +757,12 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.userinfo_encrypted_response_alg = NULL;
 	c->provider.userinfo_encrypted_response_enc = NULL;
 
+	// gluu support
+	c->provider.openid_provider = NULL;
+	c->provider.oxd_hostaddr = NULL;
+	c->provider.oxd_portnum = 0;
+	c->provider.logout_url = NULL;
+
 	c->oauth.ssl_validate_server = OX_DEFAULT_SSL_VALIDATE_SERVER;
 	c->oauth.client_id = NULL;
 	c->oauth.client_secret = NULL;
@@ -966,6 +972,23 @@ void *ox_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->provider.userinfo_encrypted_response_enc != NULL ?
 					add->provider.userinfo_encrypted_response_enc :
 					base->provider.userinfo_encrypted_response_enc;
+
+	c->provider.openid_provider =
+			add->provider.openid_provider != NULL ?
+					add->provider.openid_provider :
+					base->provider.openid_provider;
+	c->provider.oxd_hostaddr =
+			add->provider.oxd_hostaddr != NULL ?
+					add->provider.oxd_hostaddr :
+					base->provider.oxd_hostaddr;
+	c->provider.oxd_portnum =
+			add->provider.oxd_portnum != 0 ?
+					add->provider.oxd_portnum :
+					base->provider.oxd_portnum;
+	c->provider.logout_url =
+			add->provider.logout_url != NULL ?
+					add->provider.logout_url :
+					base->provider.logout_url;
 
 	c->oauth.ssl_validate_server =
 			add->oauth.ssl_validate_server != OX_DEFAULT_SSL_VALIDATE_SERVER ?
@@ -1211,11 +1234,11 @@ static int ox_check_config_openid_ox(server_rec *s, ox_cfg *c) {
 						r_uri.scheme);
 			}
 		}
-		if (c->provider.client_id == NULL)
-			return ox_check_config_error(s, "OXClientID");
-		// TODO: this depends on the configured OXResponseType now
-		if (c->provider.client_secret == NULL)
-			return ox_check_config_error(s, "OXClientSecret");
+// 		if (c->provider.client_id == NULL)
+// 			return ox_check_config_error(s, "OXClientID");
+// 		// TODO: this depends on the configured OXResponseType now
+// 		if (c->provider.client_secret == NULL)
+// 			return ox_check_config_error(s, "OXClientSecret");
 	} else {
 		if (c->provider.metadata_url != NULL) {
 			ox_serror(s,
@@ -1683,6 +1706,24 @@ command_rec ox_config_cmds[] = {
 				(void*)APR_OFFSETOF(ox_cfg, provider.client_secret),
 				RSRC_CONF,
 				"Client secret used in calls to OpenID Connect OP."),
+
+		AP_INIT_TAKE1("OXOpenIDProvider", (cmd_func)ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.openid_provider),
+				RSRC_CONF,
+				"OpenIDProvider."),
+		AP_INIT_TAKE1("OXOxdHostName", (cmd_func)ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.oxd_hostaddr),
+				RSRC_CONF,
+				"Oxd Host name or IP address."),
+		AP_INIT_TAKE1("OXOxdPortNum",
+				(cmd_func)ox_set_int_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.oxd_portnum),
+				RSRC_CONF,
+				"Oxd Port number."),
+		AP_INIT_TAKE1("OXLogoutUrl", (cmd_func)ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.logout_url),
+				RSRC_CONF,
+				"OXLogoutUrl."),
 
 		AP_INIT_TAKE1("OXRedirectURI", (cmd_func)ox_set_url_slot,
 				(void *)APR_OFFSETOF(ox_cfg, redirect_uri),
