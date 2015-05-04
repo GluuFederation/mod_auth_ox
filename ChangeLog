@@ -1,0 +1,423 @@
+4/17/2015
+- add support for applying regular expressions to OXRemoteUserClaim and OXOAuthRemoteUserClaim
+
+4/12/2015
+- make token expiry parsing of introspection result configurable (OXOAuthTokenExpiryClaim)
+- increase SHM cache key size from 255 to 512 (allows for JWT access tokens cache keys for introspection result)
+- bump to 1.8.1rc2
+
+4/1/2015
+- avoid timing attacks on symmetric key signature/hash comparisons as pointed out by @timmclean
+- bump to 1.8.1rc1
+
+3/19/2015
+- merge #57: fix build with OpenSSL <1.0 re. apr_jws_signature_is_ec (thanks to @szakharchenko)
+
+2/26/2015
+- release 1.8.0
+
+2/23/2015
+- avoid including line feeds in header values (thanks to @forkbomber and @ekanthi)
+- bump to 1.8.0rc5
+
+2/16/2015
+- fix free() crash on simple-valued error printouts
+- fix returning keys without a "kid"
+- fix searching for keys with a "x5t" thumbprint
+- refactor response type handling; more strict matching of requested response type
+- make compiled in Redis support optional
+- fix oauth.introspection_endpoint_method in initialization
+- bump to 1.8.0rc4
+
+2/15/2015
+- add support for configurable introspection HTTP method (OXOAuthIntrospectionEndpointMethod)
+- add preliminary support for GET-style logout
+- bump to 1.8.0rc2
+
+2/12/2015
+- add support for configuration of maximum session duration
+- bump to 1.8.0rc1
+
+2/9/2015
+- check JWT signature against all configured keys (jwks_uri) if no "kid" is provided, not just the first one
+- revise JOSE JWS handling part 2
+- complete support for local JWT access token validation
+- bump to 1.8.0rc0
+
+2/5/2015
+- fix symmetric key decryption of JWTs (A128CBC-HS256/A256CBC-HS512)
+- sha256 client secrets before using them as symmetric keys for decryption
+- extended decryption test coverage; avoid double printouts on error
+- refactor JWT header parsing
+- simplify JWK URI refresh handling
+- release 1.7.3
+
+2/4/2015
+- revise JOSE JWK handling part 1
+- change change target_uri parameter name to target_link_uri following draft-bradley-oauth-jwt-encoded-state-03
+- extended tests with stubs
+- refactor JWT validation (iss, exp, iat)
+- fix memory leak with RSA key conversion in apr_jwk.c - apr_jwk_rsa_bio_to_key
+- bump to 1.7.3rc4
+
+1/25/2015
+- Allow {... "error": null ...} in JSON responses. (@fatlotus)
+
+1/22/2015
+- fix configuration validation check where no config would be checked if OXProviderIssuer is set
+  but both OIDRedirectURI and OXCryptoPassphrase are not set
+- add preliminary support for local JWT access token validation
+- bump to 1.7.3rc1
+- sanitize set cookie syntax (get rid of extraneous ";")
+
+1/21/2015
+- add support for OXOAuthIntrospectionTokenParamName (incl. Google OAuth 2.0 access token validation)
+- add a sample OAuth 2.0 config for Google access tokens to README.md
+- release 1.7.2
+
+- add APXS2_OPTS to configure.ac to accommodate RPM builds
+- bump to 1.7.3rc0
+- fix JWT timestamp (iat/exp) initialization issue
+- fix README.md on Google's scope required for returning the "hd" claim
+
+1/14/2015
+- add Apache function stubs to enable extending the scope of tests
+- add tests for ox_proto_validate_access_token and ox_proto_validate_code
+- bump to 1.7.2rc3
+
+1/12/2015
+- improve accuracy of expired/invalid session handling
+
+1/11/2015
+- add error type and return values to JOSE functions
+- fix return result on error in function that decrypts CEK
+- bump to 1.7.2rc2
+
+1/1/2015
+- update copyright to 2015
+- use json_int_t (seconds) for "exp" and "iat" fields, instead of apr_time_t (microseconds) 
+- correct expiry debug printout
+- bump to 1.7.2rc1
+
+12/15/2014
+- fix Redis reconnect behavior: avoid keep reconnecting after first failure
+- bump to 1.7.2rc0
+
+12/12/2014
+- support passing cookies specified in OXPassCookies from browser on to OP/AS calls (for loadbalancing purposes)
+- release 1.7.1
+- document OXPassCookies in auth_ox.conf
+
+12/10/2014
+- reconnect to the Redis server after I/O failure as raised in #43
+- bump to 1.7.1rc4
+
+12/8/2014
+- return http 500 when detecting requests that will loop on return
+- bump to 1.7.1rc3
+
+12/3/2014
+- require the expiring access_token on the refresh hook for XSRF protection
+- pass error codes back to the caller when the refresh hook fails
+- bump to 1.7.1rc2
+
+12/2/2014
+- improve handling of non-string (=non-compliant) error responses
+
+11/26/2014
+- make shared memory cache entry max size configurable through OXCacheShmEntrySizeMax
+- add OXReturn401 configuration primitive
+- bump to 1.7.1rc1
+
+11/11/2014
+- allow OXRedirectURI's with an empty path and fix crash; thanks to @CedricCabessa
+
+11/9/2014
+- support for adding configurable JSON parameters to Dynamic Client Registration requests
+
+11/5/2014
+- release 1.7.0
+
+10/30/2014
+- correct expires_in conversion
+- first stab at HTML templating and make all html HTML 4.01 Strict compliant
+- bump to 1.7.0rc4
+
+10/29/2014
+- document refresh flow
+
+10/28/2014
+- scrub all OX_ headers
+- add support for the refresh_token flow + hook
+- pass the expires_in as an absolute timestamp in OX_access_token_expires
+- use a global mutex for the Redis cache
+- bump to 1.7.0rc3
+
+10/27/2014
+- generalize support for OAuth 2.0 token introspection and conform to:
+  https://tools.ietf.org/html/draft-ietf-oauth-introspection-00
+
+10/26/2014
+- support regular expressions in Require statements
+
+10/24/2014
+- add support for Redis cache backend; there's a dependency on hiredis headers/library now
+
+10/21/2014
+- refactor nonce generation and remove base64url padding from value
+
+10/13/2014
+- add libssl-dev to Debian control build dependencies
+- release 1.6.0
+
+10/6/2014
+- apply html encoding to error display
+- bump version number to 1.6.0rc4
+
+10/2/2014
+- avoid crash when downloading metadata from OXProviderMetadataURL fails
+- set OXProviderMetadataURL retrieval interval to 24 hours
+- return error on configurations mixing OXProviderMetadataURL and OXMetadataDir
+- bump version number to 1.6.0rc3
+
+10/1/2014
+- support provider configuration from a metadata URL (OXProviderMetadataURL)
+- bump version number to 1.6.0rc2
+
+9/30/2014
+- be less strict about issuer validation in metadata
+- refactor metadata.c
+- improve logging about userinfo endpoint
+
+9/29/2014
+- refactor cache so it is partitioned in to sections (i.e. avoid future key collisions)
+
+9/25/2014
+- add support for "x5c" JWK representation
+- return JWKS on jwks_uri with content-type "application/json"
+
+9/17/2014
+- remove support for the X-Frame-Options as it is not needed in 302s
+- create and use log macros that printout function name
+
+9/16/2014
+- support for passing runtime determined authentication request parameters in the discovery response
+- include name/version in logs and bump to 1.6.0rc1
+- don't use the X-Frame-Options by default
+
+9/13/2014
+- add support for the X-Frame-Options header as recommended by the spec
+
+9/12/2014
+- set expiry on state cookies; don't clear session cookie after cache miss or corruption
+- fix JSON array memory leak in oauth.c
+
+9/10/2014
+- merge #34 (g10f), fix session management Javascript bug
+
+9/3/2014
+- improve error handling on hitting the redirect URI directly
+- fix set_slot functions for algorithm/url used as default for dynamic registration
+- rewording of auth_ox.conf docs on JWK settings
+
+9/1/2014
+- add session management based on http://openid.net/specs/openid-connect-session-1_0.html (draft 21)
+
+8/29/2014
+- add configuration option to POST extra parameters to the token endpoint
+
+8/26/2014
+- correct cookie_path comparison
+- release 1.5.5
+
+8/20/2014
+- correctly error out on flows where no id_token was provided ("token")
+
+8/19/2014
+- fix debug printout on open redirect prevention
+- cleanup in-memory crypto context on shutdown
+- use default of "/" for OXCookiePath to simplify quickstart/simple deployments
+- disable OXMetadataDir in sample/default config file
+- clear session cookie after cache miss or corruption
+
+8/18/2014
+- add HttpOnly flag to cookies by default; can be disabled by config
+
+8/14/2014
+- support for passing the id_token in multiple formats (claims|payload|serialized)
+- release 1.5.4
+
+8/13/2014
+- pass the access_token in OX_access_token header to the application
+
+8/9/2014
+- merge #21 (Latinovic) to close #18 (big endian JWE issue)
+- merge #20 (wadahiro), support for "none" JWT signing algorithm
+
+8/1/2014
+- fix cache initialization/destroy leak
+- release 1.5.3
+
+7/26/2014
+- refactor http code; cleanup JSON encoding in client registration
+- refactor padding handling in base64url encoding/decoding
+
+7/20/2014
+- check for open redirect on passed target_link_uri
+- prevent JWE timing attacks on CEK; add JWE test
+- include client_id and scope values in resolved access_token
+
+7/1/2014
+- pass JSON objects in app HTTP headers as plain JSON
+- correct printout in id_token hash comparisons
+- add more tests
+- release 1.5.2
+
+6/12/2014
+- support third-party-initiated login as defined in the spec
+- release 1.5.1
+- fix PF OAuth 2.0 RS functionality after upgrading to jansson
+
+6/6/2014
+- more changes for Debian packaging (1.5-3)
+
+6/5/2014
+- do not set Secure cookies for plain HTTP
+- add warning/errors when configured hosts/domains do not match
+- release 1.5
+- changes for Debian packaging
+
+6/4/2014
+- fix passing integer claims on non-Mac OS X systems
+- fix claims-based authorization with integer values (@martinsrom)
+- fix getting the id_token from request state and error logging
+- add AUTHORS file with credits
+- migrate README to Markdown README.md
+
+6/3/2014
+- change JSON parser from https://github.com/moriyoshi/apr-json to http://www.digip.org/jansson/
+
+6/2/2014
+- handle X-Forwarded-Proto/X-Forwarded-Port when running behind a proxy/load-balancer
+- release version 1.4
+
+6/1/2014
+- compile with OpenSSL <1.0 and but then disable Elliptic Curve verification
+- fix jwks_uri setting in nested vhosts
+- use OpenSSL_add_all_digests in initialization and EVP_cleanup on shutdown
+
+5/31/2014
+- README additions/improvements
+
+5/29/2014
+- correct big endian detection
+- allow for key identification in JWKs based on thumbprint (x5t)
+
+5/24/2014
+- add cache destroy function and destroy shm cache resources on shutdown
+
+5/23/2014
+- doc corrections to auth_ox.conf
+
+5/22/2014
+- add implementation of OP-initiated-SSO based on:
+  http://tools.ietf.org/html/draft-bradley-oauth-jwt-encoded-state-01
+- fix nonce caching for replay prevention
+
+5/21/2014
+- correct README on enabling Google+ APIs before applying the sample Google configs
+- fix AuthNHeader setting and allow server-wide config too
+- avoid segfault on corrupted/non- JSON/JWT input
+
+5/20/2014
+- fix URL assembly when running on non-standard port
+- release 1.3
+
+5/17/2014
+- support outgoing proxy using OXOutgoingProxy
+- correct sample configs in documentation for missing OXCookiePath
+- support OXCookiePath in server-wide config as well
+
+5/13/2014
+- support configurable (custom) query parameters in the authorization request
+
+5/12/2014
+- support encrypted JWTs using A128KW and A256KW for the Content Encryption Key
+- support A256CBC-HS512 encrypted JWTs
+- support custom client JWKs URI
+
+5/8/2014
+- support encrypted JWTs using RSA1_5 and A128CBC-HS256
+
+5/2/2014
+- do not use ap_get_remote_host for browser fingerprinting
+
+5/1/2014
+- split out custom client config into separate <issuer>.conf file
+- allow to override client_contact, client_name and registration_token in .conf file
+- remove OXRegistrationToken command for the static OP config
+
+4/29/2014
+- support JWT verification of ES256, ES384 and ES512 algorithms
+
+4/28/2014
+- support configurable response_mode (fragment, query or form_post)
+- use nonce in all flows except for OP Google and flows "code" or "code token"
+
+4/26/2014
+- make client secret optional (support self-issued OP)
+
+4/25/2014
+- support Hybrid flows
+
+4/24/2014
+- fix using Bearer token Authorization header on JSON POST calls
+- support using a Bearer token on client registration calls
+
+4/22/2014
+- match request and response type 
+- check at_hash value on "token id_token" implicit flow
+- use shared memory caching by default
+- release 1.2
+
+4/19/2014
+- store response_type in state and make state a JSON object
+
+4/18/2014
+- support RSASSA-PSS token signing algorithms (PS256,PS384,PS512)
+
+4/17/2014
+- improve session inactivity timeout handling
+
+4/16/2014
+- set REMOTE_USER and HTTP headers on OAuth 2.0 protected paths
+
+4/15/2014
+- add session inactivity timeout
+- register all supported response_types during client registration and try
+  to pick the one that matches the configured default
+- use long timeouts on JWK retrieval calls
+- allow for non-null but empty query parameters on implicit authorization response
+- simplify azp/aud and nonce handling
+- change session_type naming (to "server-cache"/"client-cookie")
+
+4/14/2014
+- factor out JOSE related code
+
+4/3/2014
+- add configurable claim name for the REMOTE_USER variable, optionally postfixed with the  url-encoded
+  issuer value; the default for the remote username is "sub@" now, makeing it unique across OPs
+- some refactoring of id_token validation functions
+- add INSTALL, move auth_ox.conf to main directory
+- release 1.1
+
+3/28/2014
+- fix Require claim name mismatch for Apache 2.4
+- fix hmac method/printout naming artifacts from earlier
+auto-search-and-replace
+- release v1.0.1
+
+3/27/2014
+- initial import named mod_auth_ox
+- updated README
+- fix debian/changelog
