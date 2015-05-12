@@ -768,7 +768,7 @@ apr_byte_t ox_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
 	ox_dir_cfg *dir_cfg = (ox_dir_cfg *)ap_get_module_config(r->per_dir_config,
 			&auth_ox_module);
 
-	/* get provider metadata from the specified URL with the specified parameters */
+// 	/* get provider metadata from the specified URL with the specified parameters */
 // 	if (ox_util_http_get(r, url, NULL, NULL, NULL,
 // 			cfg->provider.ssl_validate_server, response,
 // 			cfg->http_timeout_short, cfg->outgoing_proxy,
@@ -778,7 +778,7 @@ apr_byte_t ox_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
 	if (oxd_discovery(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, 
 		cfg->provider.openid_provider, resp_str) != FALSE) 
 	{
-		(*response) = (char *)malloc(strlen(resp_str)+1);
+		(*response) = (char *)apr_pcalloc(r->pool, strlen(resp_str)+1);
 		memcpy((void *)(*response), resp_str, strlen(resp_str));
 		((char *)(*response))[strlen(resp_str)] = 0;
 

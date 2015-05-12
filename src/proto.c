@@ -54,6 +54,7 @@
 #include <http_request.h>
 
 #include "mod_auth_ox.h"
+#include "oxd/oxd_client.h"
 
 #include <openssl/opensslconf.h>
 #include <openssl/opensslv.h>
@@ -856,6 +857,36 @@ static apr_byte_t ox_proto_token_endpoint_request(request_rec *r,
 			NULL);
 
 	json_decref(result);
+
+	/* check id_token status, set the environment variables. */
+	{
+		char resp_str[8192];
+		if (oxd_check_id_token(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, cfg->provider.openid_provider, *id_token, resp_str) == FALSE)
+		{
+			return FALSE;
+		}
+		
+		// Check status of id token
+		token_timeout = oic_check_session(s_cfg, id_token.c_str(), session_id.c_str());
+		if (token_timeout <= 0)
+			return show_error(r, s_cfg, "oxd: OpenID Connect check session failed");
+
+		// Save paraams into memcached
+		Set_Ox_Storage(session_id.c_str(), "session_id", session_tmp.c_str(), time_out);
+		apr_table_set(r->headers_out, "OIC_SESSION_ID", session_tmp.c_str());
+
+		Set_Ox_Storage(session_id.c_str(), "id_token", id_token.c_str(), time_out);
+		apr_table_set(r->headers_out, "OIC_ID_TOKEN", id_token.c_str());
+
+		Set_Ox_Storage(session_id.c_str(), "access_token", access_token.c_str(), time_out);
+		apr_table_set(r->headers_out, "OIC_ACCESS_TOKEN", access_token.c_str());
+
+		Set_Ox_Storage(session_id.c_str(), "scope", scope.c_str(), time_out);
+		apr_table_set(r->headers_out, "OIC_SCOPE", scope.c_str());
+
+		Set_Ox_Storage(session_id.c_str(), "state", state.c_str(), time_out);
+		apr_table_set(r->headers_out, "OIC_STATE", state.c_str());
+	}
 
 	return TRUE;
 }
