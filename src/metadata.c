@@ -758,7 +758,7 @@ apr_byte_t ox_metadata_jwks_get(request_rec *r, ox_cfg *cfg,
 /*
  * use OpenID Connect Discovery to get metadata for the specified issuer
  */
-apr_byte_t ox_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
+apr_byte_t openid_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
 		const char *issuer, const char *url, json_t **j_metadata,
 		const char **response) 
 {
@@ -791,6 +791,104 @@ apr_byte_t ox_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
 			ox_json_object_get_string(r->pool, j_clientinfo, "client_id", &cfg->provider.client_id, NULL);
 		if (cfg->provider.client_secret == NULL)
 			ox_json_object_get_string(r->pool, j_clientinfo, "client_secret", &cfg->provider.client_secret, NULL);
+		if (cfg->provider.client_credit_path != NULL)
+			json_dump_file(j_clientinfo, cfg->provider.client_credit_path, JSON_ENCODE_ANY);
+		
+		json_decref(j_clientinfo);
+	}
+	else 
+	{
+		return FALSE;
+	}
+
+	/* decode and see if it is not an error response somehow */
+	if (ox_util_decode_json_and_check_error(r, *response, j_metadata) == FALSE)
+		return FALSE;
+
+	/* check to see if it is valid metadata */
+	if (ox_metadata_provider_is_valid(r, *j_metadata, issuer) == FALSE)
+		return FALSE;
+
+	/* all OK */
+	return TRUE;
+}
+
+/*
+ * use UMA Discovery to get metadata for the specified issuer
+ */
+apr_byte_t uma_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
+		const char *issuer, const char *url, json_t **j_metadata,
+		const char **response) 
+{
+	char resp_str[8192];
+
+	/* get a handle to the directory config */
+	ox_dir_cfg *dir_cfg = (ox_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+
+	// discovery
+	if (oxd_discovery(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, 
+		cfg->provider.openid_provider, resp_str) != FALSE) 
+	{
+		(*response) = (char *)apr_pcalloc(r->pool, strlen(resp_str)+1);
+		memcpy((void *)(*response), resp_str, strlen(resp_str));
+		((char *)(*response))[strlen(resp_str)] = 0;
+
+		json_t *j_clientinfo;
+
+		// register client
+		oxd_register_client(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum,
+			cfg->provider.openid_provider, cfg->redirect_uri, cfg->provider.logout_url, cfg->provider.client_name, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (cfg->provider.client_id == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_id", &cfg->provider.client_id, NULL);
+		if (cfg->provider.client_secret == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_secret", &cfg->provider.client_secret, NULL);
+		if (cfg->provider.client_credit_path != NULL)
+			json_dump_file(j_clientinfo, cfg->provider.client_credit_path, JSON_ENCODE_ANY);
+		json_decref(j_clientinfo);
+
+		// obtain pat
+		char *user_id = "";//"admin";
+		char *user_secret = "";//"rootroot";
+		oxd_obtain_pat(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum,
+			cfg->provider.openid_provider, cfg->provider.uma_auth_server, cfg->redirect_uri, 
+			cfg->provider.client_id, cfg->provider.client_secret, user_id, user_secret, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (cfg->provider.pat_token == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "pat_token", &cfg->provider.pat_token, NULL);
+		json_decref(j_clientinfo);
+
+		// register resource
+		oxd_register_resource(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, cfg->provider.uma_auth_server, 
+			cfg->provider.pat_token, cfg->provider.uma_resource_name, cfg->provider.uma_scope, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (cfg->provider.uma_resource_id == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "_id", &cfg->provider.uma_resource_id, NULL);
+		json_decref(j_clientinfo);
+
+		// obtain aat
+		oxd_obtain_aat(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, 
+			cfg->provider.openid_provider, cfg->provider.uma_auth_server, cfg->redirect_uri, 
+			cfg->provider.client_id, cfg->provider.client_secret, user_id, user_secret, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (cfg->provider.aat_token == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "aat_token", &cfg->provider.aat_token, NULL);
+		json_decref(j_clientinfo);
+
+		// obtain rpt
+		if (cfg->provider.uma_amhost == NULL)
+			cfg->provider.uma_amhost = cfg->provider.uma_auth_server;
+		oxd_obtain_rpt(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, 
+			cfg->provider.aat_token, cfg->provider.uma_amhost, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (cfg->provider.rpt_token == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "rpt_token", &cfg->provider.rpt_token, NULL);
 		json_decref(j_clientinfo);
 	}
 	else 
@@ -841,7 +939,7 @@ static apr_byte_t ox_metadata_provider_get(request_rec *r, ox_cfg *cfg,
 			url[strlen(url) - 1] != '/' ? "/" : "");
 
 	/* get the metadata for the issuer using OpenID Connect Discovery and validate it */
-	if (ox_metadata_provider_retrieve(r, cfg, issuer, url, j_provider,
+	if (openid_metadata_provider_retrieve(r, cfg, issuer, url, j_provider,
 			&response) == FALSE)
 		return FALSE;
 

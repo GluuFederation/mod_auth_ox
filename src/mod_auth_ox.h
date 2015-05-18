@@ -230,6 +230,19 @@ typedef struct ox_provider_t {
 	char *oxd_hostaddr;
 	int oxd_portnum;
 	char *logout_url;
+	char *client_credit_path;
+	char *requested_acr;
+
+	// gluu uma support
+	char *uma_auth_server;
+	char *pat_token;
+	char *aat_token;
+	char *rpt_token;
+	char *uma_resource_name;
+	char *uma_resource_id;
+	char *uma_scope;
+	char *uma_rshost;
+	char *uma_amhost;
 } ox_provider_t ;
 
 typedef struct ox_remote_user_claim_t {
@@ -347,7 +360,7 @@ int ox_oauth_check_userid(request_rec *r, ox_cfg *c);
 
 // ox_proto.c
 
-int ox_proto_authorization_request(request_rec *r, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *auth_request_params);
+int ox_proto_authorization_request(request_rec *r, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *requested_acr, const char *auth_request_params);
 apr_byte_t ox_proto_is_post_authorization_response(request_rec *r, ox_cfg *cfg);
 apr_byte_t ox_proto_is_redirect_authorization_response(request_rec *r, ox_cfg *cfg);
 apr_byte_t ox_proto_resolve_code(request_rec *r, ox_cfg *cfg, ox_provider_t *provider, const char *code, char **id_token, char **access_token, char **token_type, int *expires_in, char **refresh_token);
@@ -437,7 +450,8 @@ unsigned char *ox_crypto_aes_decrypt(request_rec *r, ox_cfg *cfg, unsigned char 
 apr_byte_t ox_crypto_destroy(ox_cfg *cfg, server_rec *s);
 
 // ox_metadata.c
-apr_byte_t ox_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg, const char *issuer, const char *url, json_t **j_metadata, const char **response);
+apr_byte_t openid_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg, const char *issuer, const char *url, json_t **j_metadata, const char **response);
+apr_byte_t uma_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg, const char *issuer, const char *url, json_t **j_metadata, const char **response);
 apr_byte_t ox_metadata_provider_parse(request_rec *r, json_t *j_provider, ox_provider_t *provider);
 apr_byte_t ox_metadata_list(request_rec *r, ox_cfg *cfg, apr_array_header_t **arr);
 apr_byte_t ox_metadata_get(request_rec *r, ox_cfg *cfg, const char *selected, ox_provider_t **provider);

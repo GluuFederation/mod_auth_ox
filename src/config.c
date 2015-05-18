@@ -762,6 +762,18 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.oxd_hostaddr = NULL;
 	c->provider.oxd_portnum = 0;
 	c->provider.logout_url = NULL;
+	c->provider.client_credit_path = NULL;
+	c->provider.requested_acr = NULL;
+
+	c->provider.uma_auth_server = NULL;
+	c->provider.pat_token = NULL;
+	c->provider.aat_token = NULL;
+	c->provider.rpt_token = NULL;
+	c->provider.uma_resource_name = NULL;
+	c->provider.uma_resource_id = NULL;
+	c->provider.uma_scope = NULL;
+	c->provider.uma_rshost = NULL;
+	c->provider.uma_amhost = NULL;
 
 	c->oauth.ssl_validate_server = OX_DEFAULT_SSL_VALIDATE_SERVER;
 	c->oauth.client_id = NULL;
@@ -989,6 +1001,35 @@ void *ox_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->provider.logout_url != NULL ?
 					add->provider.logout_url :
 					base->provider.logout_url;
+	c->provider.client_credit_path =
+			add->provider.client_credit_path != NULL ?
+					add->provider.client_credit_path :
+					base->provider.client_credit_path;
+	c->provider.requested_acr =
+			add->provider.requested_acr != NULL ?
+					add->provider.requested_acr :
+					base->provider.requested_acr;
+
+	c->provider.uma_auth_server =
+			add->provider.uma_auth_server != NULL ?
+					add->provider.uma_auth_server :
+					base->provider.uma_auth_server;
+	c->provider.uma_resource_name =
+			add->provider.uma_resource_name != NULL ?
+					add->provider.uma_resource_name :
+					base->provider.uma_resource_name;
+	c->provider.uma_scope =
+			add->provider.uma_scope != NULL ?
+					add->provider.uma_scope :
+					base->provider.uma_scope;
+	c->provider.uma_rshost =
+			add->provider.uma_rshost != NULL ?
+					add->provider.uma_rshost :
+					base->provider.uma_rshost;
+	c->provider.uma_amhost =
+					add->provider.uma_amhost != NULL ?
+					add->provider.uma_amhost :
+					base->provider.uma_amhost;
 
 	c->oauth.ssl_validate_server =
 			add->oauth.ssl_validate_server != OX_DEFAULT_SSL_VALIDATE_SERVER ?
@@ -1725,6 +1766,34 @@ command_rec ox_config_cmds[] = {
 			(void*)APR_OFFSETOF(ox_cfg, provider.logout_url),
 			RSRC_CONF,
 			"Url to logout OpenID connect"),
+		AP_INIT_TAKE1("OXClientCredsPath", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.client_credit_path),
+			RSRC_CONF,
+			"Client Credit path on File system"),
+		AP_INIT_TAKE1("OXRequestedAcr", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.requested_acr),
+			RSRC_CONF,
+			"Multi-value list of authentication workflows requested"),
+		AP_INIT_TAKE1("UMAAuthorizationServer", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.uma_auth_server),
+			RSRC_CONF,
+			"UMAAuthorizationServer"),
+		AP_INIT_TAKE1("UMAResourceName", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.uma_resource_name),
+			RSRC_CONF,
+			"UMAResourceName"),
+		AP_INIT_TAKE1("UMAScope", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.uma_scope),
+			RSRC_CONF,
+			"UMAScope"),
+		AP_INIT_TAKE1("UMARsHost", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.uma_rshost),
+			RSRC_CONF,
+			"UMARsHost"),
+		AP_INIT_TAKE1("UMAAmHost", (cmd_func)ox_set_string_slot,
+			(void*)APR_OFFSETOF(ox_cfg, provider.uma_amhost),
+			RSRC_CONF,
+			"UMAAmHost"),
 
 		AP_INIT_TAKE1("OXRedirectURI", (cmd_func)ox_set_url_slot,
 			(void *)APR_OFFSETOF(ox_cfg, redirect_uri),
@@ -2113,6 +2182,34 @@ command_rec ox_config_cmds[] = {
 				(void*)APR_OFFSETOF(ox_cfg, provider.logout_url),
 				RSRC_CONF,
 				"Url to logout OpenID connect"),
+		AP_INIT_TAKE1("OXClientCredsPath", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.client_credit_path),
+				RSRC_CONF,
+				"Client Credit path on File system"),
+		AP_INIT_TAKE1("OXRequestedAcr", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.requested_acr),
+				RSRC_CONF,
+				"Multi-value list of authentication workflows requested"),
+		AP_INIT_TAKE1("UMAAuthorizationServer", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.uma_auth_server),
+				RSRC_CONF,
+				"UMAAuthorizationServer."),
+		AP_INIT_TAKE1("UMAResourceName", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.uma_resource_name),
+				RSRC_CONF,
+				"UMAResourceName"),
+		AP_INIT_TAKE1("UMAScope", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.uma_scope),
+				RSRC_CONF,
+				"UMAScope"),
+		AP_INIT_TAKE1("UMARsHost", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.uma_rshost),
+				RSRC_CONF,
+				"UMARsHost"),
+		AP_INIT_TAKE1("UMAAmHost", ox_set_string_slot,
+				(void*)APR_OFFSETOF(ox_cfg, provider.uma_amhost),
+				RSRC_CONF,
+				"UMAAmHost"),
 
 		AP_INIT_TAKE1("OXRedirectURI", ox_set_url_slot,
 				(void *)APR_OFFSETOF(ox_cfg, redirect_uri),

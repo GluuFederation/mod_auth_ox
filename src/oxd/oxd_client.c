@@ -112,7 +112,10 @@ apr_byte_t oxd_discovery(const char *hostname, int portnum, const char *discover
 	char req[BUFSIZE]="";
 	char resp[BUFSIZE]="";
  
-    if ((discovery_url == NULL) || (hostname == NULL) || (portnum < 0)) {
+    if ((discovery_url == NULL) || 
+		(result == NULL) || 
+		(hostname == NULL) || 
+		(portnum < 0)) {
         return FALSE;
     }
     
@@ -138,6 +141,9 @@ apr_byte_t oxd_discovery(const char *hostname, int portnum, const char *discover
         goto error;
     }
     apr_socket_close(s);
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
 
 	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
 		goto error;
@@ -169,6 +175,7 @@ apr_byte_t oxd_register_client(const char *hostname, int portnum, \
 		(redirect_url == NULL) || 
 		(logout_redirect_url == NULL) || 
 		(client_name == NULL) || 
+		(result == NULL) || 
 		(hostname == NULL) || 
 		(portnum < 0)) {
 		return FALSE;
@@ -211,27 +218,97 @@ apr_byte_t oxd_register_client(const char *hostname, int portnum, \
 	memcpy(result, &resp[26], strlen(&resp[26]));
 	result[strlen(&resp[26])] = 0;
 
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
 	return TRUE;
 
 error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
 	return FALSE;
 }
 
-int oxd_obtain_pat(const char *hostname, int portnum, \
-				 const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, \
-				 const char *client_id, const char *client_secret, \
-				 const char *user_id, const char *user_secret, \
-				 char *resp_str)
+apr_byte_t oxd_check_id_token(const char *hostname, int portnum, const char *discovery_url, const char *id_token, char *result)
 {
 	apr_status_t rv;
 	apr_pool_t *mp;
 	apr_socket_t *s;
 	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
 
-	if (!discovery_url || !uma_discovery_url || !redirect_url || !client_id || !client_secret || !user_id || !user_secret || !hostname || 
+	if ((discovery_url == NULL) || 
+		(id_token == NULL) || 
+		(result == NULL) || 
+		(hostname == NULL) || 
 		(portnum < 0)) {
+			return -1;
+	}
+
+	apr_initialize();
+	apr_pool_create(&mp, NULL);
+
+	rv = do_connect(&s, mp, hostname, portnum);
+	if (rv != APR_SUCCESS) {
+		goto error;
+	}
+
+	strcat(req, "    ");
+	strcat(&req[4], "{\"command\":\"id_token_status\",\"params\":{\"discovery_url\":\"");
+	strcat(req, "https://");
+	strcat(req, discovery_url);
+	strcat(req, "/.well-known/openid-configuration");
+	strcat(req, "\",\"id_token\":\"");
+	strcat(req, id_token);
+	strcat(req, "\"}}");
+	sprintf(&req[0], "%04lu", strlen(req)-4);
+	req[4] = '{';
+
+	rv = do_client_task(s, req, resp);
+	if (rv != APR_SUCCESS) {
+		goto error;
+	}
+	apr_socket_close(s);
+
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
+	apr_terminate();
+	return TRUE;
+
+error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
+	apr_terminate();
+	return FALSE;
+}
+
+apr_byte_t oxd_obtain_pat(const char *hostname, int portnum, \
+				 const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, \
+				 const char *client_id, const char *client_secret, \
+				 const char *user_id, const char *user_secret, \
+				 char *result)
+{
+	apr_status_t rv;
+	apr_pool_t *mp;
+	apr_socket_t *s;
+	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
+
+	if (!discovery_url || !uma_discovery_url || !redirect_url || !client_id || !client_secret || 
+		!user_id || !user_secret || !hostname || !result ||	(portnum < 0)) {
 			return -1;
 	}
 
@@ -266,27 +343,42 @@ int oxd_obtain_pat(const char *hostname, int portnum, \
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';
 
-	rv = do_client_task(s, req, resp_str);
+	rv = do_client_task(s, req, resp);
 	if (rv != APR_SUCCESS) {
 		goto error;
 	}
 	apr_socket_close(s);
 
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return 0;
+	return TRUE;
 
 error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return -1;
+	return FALSE;
 }
 
-int oxd_register_resource(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, \
-				   const char *resource_name, const char *scopes, char *resp_str)
+apr_byte_t oxd_register_resource(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, \
+				   const char *resource_name, const char *scopes, char *result)
 {
 	apr_status_t rv;
 	apr_pool_t *mp;
 	apr_socket_t *s;
 	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
 
 	if (!uma_discovery_url || !pat_token || !resource_name || !hostname || !scopes || (portnum < 0)) {
 			return -1;
@@ -316,30 +408,45 @@ int oxd_register_resource(const char *hostname, int portnum, const char *uma_dis
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';
 
-	rv = do_client_task(s, req, resp_str);
+	rv = do_client_task(s, req, resp);
 	if (rv != APR_SUCCESS) {
 		goto error;
 	}
 	apr_socket_close(s);
 
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return 0;
+	return TRUE;
 
 error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return -1;
+	return FALSE;
 }
 
-int oxd_obtain_aat(const char *hostname, int portnum, \
+apr_byte_t oxd_obtain_aat(const char *hostname, int portnum, \
 				   const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, \
 				   const char *client_id, const char *client_secret, \
 				   const char *user_id, const char *user_secret, \
-				   char *resp_str)
+				   char *result)
 {
 	apr_status_t rv;
 	apr_pool_t *mp;
 	apr_socket_t *s;
 	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
 
 	if (!discovery_url || !uma_discovery_url || !redirect_url || !client_id || !client_secret || !user_id || !user_secret || !hostname || 
 		(portnum < 0)) {
@@ -377,26 +484,42 @@ int oxd_obtain_aat(const char *hostname, int portnum, \
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';
 
-	rv = do_client_task(s, req, resp_str);
+	rv = do_client_task(s, req, resp);
 	if (rv != APR_SUCCESS) {
 		goto error;
 	}
 	apr_socket_close(s);
 
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return 0;
+	return TRUE;
 
 error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return -1;
+	return FALSE;
 }
 
-int oxd_obtain_rpt(const char *hostname, int portnum, const char *aat_token, const char *am_host, char *resp_str)
+apr_byte_t oxd_obtain_rpt(const char *hostname, int portnum, \
+				   const char *aat_token, const char *am_host, char *result)
 {
 	apr_status_t rv;
 	apr_pool_t *mp;
 	apr_socket_t *s;
 	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
 
 	if (!aat_token || !hostname || (portnum < 0)) {
 			return -1;
@@ -419,18 +542,32 @@ int oxd_obtain_rpt(const char *hostname, int portnum, const char *aat_token, con
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';
 
-	rv = do_client_task(s, req, resp_str);
+	rv = do_client_task(s, req, resp);
 	if (rv != APR_SUCCESS) {
 		goto error;
 	}
 	apr_socket_close(s);
 
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return 0;
+	return TRUE;
 
 error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
-	return -1;
+	return FALSE;
 }
 
 int oxd_check_rpt_status(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *rpt_token, char *resp_str)
@@ -470,6 +607,9 @@ int oxd_check_rpt_status(const char *hostname, int portnum, const char *uma_disc
 		goto error;
 	}
 	apr_socket_close(s);
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
 
 	apr_terminate();
 	return 0;
@@ -527,6 +667,9 @@ int oxd_register_ticket(const char *hostname, int portnum, const char *uma_disco
 		goto error;
 	}
 	apr_socket_close(s);
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
 
 	apr_terminate();
 	return 0;
@@ -586,6 +729,9 @@ int oxd_authorize_rpt_token(const char *hostname, int portnum, const char *aat_t
 	}
 	apr_socket_close(s);
 
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
 	apr_terminate();
 	return 0;
 
@@ -594,55 +740,4 @@ error:
 	return -1;
 }
 
-int oxd_check_id_token(const char *hostname, int portnum, const char *discovery_url, const char *id_token, char *resp_str)
-{
-	apr_status_t rv;
-	apr_pool_t *mp;
-	apr_socket_t *s;
-	char req[BUFSIZE]="";
 
-	if ((discovery_url == NULL) || 
-		(id_token == NULL) || 
-		(hostname == NULL) || 
-		(portnum < 0)) {
-			return -1;
-	}
-
-	apr_initialize();
-	apr_pool_create(&mp, NULL);
-
-	rv = do_connect(&s, mp, hostname, portnum);
-	if (rv != APR_SUCCESS) {
-		goto error;
-	}
-
-	strcat(req, "    ");
-	strcat(&req[4], "{\"command\":\"id_token_status\",\"params\":{\"discovery_url\":\"");
-	strcat(req, "https://");
-	strcat(req, discovery_url);
-	strcat(req, "/.well-known/openid-configuration");
-	strcat(req, "\",\"id_token\":\"");
-	strcat(req, id_token);
-	strcat(req, "\"}}");
-	sprintf(&req[0], "%04lu", strlen(req)-4);
-	req[4] = '{';
-
-	rv = do_client_task(s, req, resp_str);
-	if (rv != APR_SUCCESS) {
-		goto error;
-	}
-	apr_socket_close(s);
-
-	/* destroy the memory pool. These chunks above are freed by this */
-	apr_pool_destroy(mp);
-
-	apr_terminate();
-	return 0;
-
-error:
-	/* destroy the memory pool. These chunks above are freed by this */
-	apr_pool_destroy(mp);
-
-	apr_terminate();
-	return -1;
-}

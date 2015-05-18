@@ -196,7 +196,7 @@ static char *ox_get_state_cookie_name(request_rec *r, const char *state) {
 /*
  * return the static provider configuration, i.e. from a metadata URL or configuration primitives
  */
-static apr_byte_t ox_provider_static_config(request_rec *r, ox_cfg *c,
+static apr_byte_t openid_provider_static_config(request_rec *r, ox_cfg *c,
 		ox_provider_t **provider) {
 
 	json_t *j_provider = NULL;
@@ -213,7 +213,61 @@ static apr_byte_t ox_provider_static_config(request_rec *r, ox_cfg *c,
 
 	if (s_json == NULL) {
 
-		if (ox_metadata_provider_retrieve(r, c, NULL,
+		if (openid_metadata_provider_retrieve(r, c, NULL,
+				c->provider.metadata_url, &j_provider, &s_json) == FALSE) {
+			ox_error(r, "could not retrieve metadata from url: %s",
+					c->provider.metadata_url);
+			return FALSE;
+		}
+
+		// TODO: make the expiry configurable
+		c->cache->set(r, OX_CACHE_SECTION_PROVIDER, c->provider.metadata_url,
+				s_json,
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+
+	} else {
+
+		/* correct parsing and validation was already done when it was put in the cache */
+		j_provider = json_loads(s_json, 0, 0);
+	}
+
+	*provider = (ox_provider_t *)apr_pcalloc(r->pool, sizeof(ox_provider_t));
+	memcpy(*provider, &c->provider, sizeof(ox_provider_t));
+
+	if (ox_metadata_provider_parse(r, j_provider, *provider) == FALSE) {
+		ox_error(r, "could not parse metadata from url: %s",
+				c->provider.metadata_url);
+		if (j_provider)
+			json_decref(j_provider);
+		return FALSE;
+	}
+
+	json_decref(j_provider);
+
+	return TRUE;
+}
+
+/*
+ * return the static provider configuration, i.e. from a metadata URL or configuration primitives
+ */
+static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
+		ox_provider_t **provider) {
+
+	json_t *j_provider = NULL;
+	const char *s_json = NULL;
+
+	/* see if we should configure a static provider based on external (cached) metadata */
+	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
+		*provider = &c->provider;
+		return TRUE;
+	}
+
+	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.metadata_url,
+			&s_json);
+
+	if (s_json == NULL) {
+
+		if (uma_metadata_provider_retrieve(r, c, NULL,
 				c->provider.metadata_url, &j_provider, &s_json) == FALSE) {
 			ox_error(r, "could not retrieve metadata from url: %s",
 					c->provider.metadata_url);
@@ -255,7 +309,7 @@ static ox_provider_t *ox_get_provider_for_issuer(request_rec *r,
 
 	/* by default we'll assume that we're dealing with a single statically configured OP */
 	ox_provider_t *provider = NULL;
-	if (ox_provider_static_config(r, c, &provider) == FALSE)
+	if (openid_provider_static_config(r, c, &provider) == FALSE)
 		return NULL;
 
 	/* unless a metadata directory was configured, so we'll try and get the provider settings from there */
@@ -622,7 +676,7 @@ static apr_byte_t ox_set_app_claims(request_rec *r,
 	return TRUE;
 }
 
-static int ox_authenticate_user(request_rec *r, ox_cfg *c,
+static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 		ox_provider_t *provider, const char *original_url,
 		const char *login_hint, const char *id_token_hint, const char *prompt,
 		const char *auth_request_params);
@@ -657,7 +711,7 @@ static int ox_check_max_session_duration(request_rec *r, ox_cfg *cfg,
 		ox_warn(r, "maximum session duration exceeded for user: %s",
 				session->remote_user);
 		ox_session_kill(r, session);
-		return ox_authenticate_user(r, cfg, NULL,
+		return openid_authenticate_user(r, cfg, NULL,
 				ox_get_current_url(r, cfg), NULL,
 				NULL, NULL, NULL);
 	}
@@ -1366,7 +1420,7 @@ static int ox_discovery(request_rec *r, ox_cfg *cfg) {
 /*
  * authenticate the user to the selected OP, if the OP is not selected yet perform discovery first
  */
-static int ox_authenticate_user(request_rec *r, ox_cfg *c,
+static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 		ox_provider_t *provider, const char *original_url,
 		const char *login_hint, const char *id_token_hint, const char *prompt,
 		const char *auth_request_params) {
@@ -1380,7 +1434,7 @@ static int ox_authenticate_user(request_rec *r, ox_cfg *c,
 			return ox_discovery(r, c);
 
 		/* we're not using multiple OP's configured in a metadata directory, pick the statically configured OP */
-		if (ox_provider_static_config(r, c, &provider) == FALSE)
+		if (openid_provider_static_config(r, c, &provider) == FALSE)
 			return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
@@ -1475,7 +1529,122 @@ static int ox_authenticate_user(request_rec *r, ox_cfg *c,
 	// TODO: maybe show intermediate/progress screen "redirecting to"
 	return ox_proto_authorization_request(r, provider, login_hint,
 			c->redirect_uri, state, proto_state, id_token_hint,
-			auth_request_params);
+			c->provider.requested_acr, auth_request_params);
+}
+
+/*
+ * authenticate the user to the selected OP, if the OP is not selected yet perform discovery first
+ */
+static int uma_authenticate_user(request_rec *r, ox_cfg *c,
+		ox_provider_t *provider, const char *original_url,
+		const char *login_hint, const char *id_token_hint, const char *prompt,
+		const char *auth_request_params) {
+
+	ox_debug(r, "enter");
+
+	if (provider == NULL) {
+
+		// TODO: should we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
+		if (c->metadata_dir != NULL)
+			return ox_discovery(r, c);
+
+		/* we're not using multiple OP's configured in a metadata directory, pick the statically configured OP */
+		if (uma_provider_static_config(r, c, &provider) == FALSE)
+			return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* generate the random nonce value that correlates requests and responses */
+	char *nonce = NULL;
+	if (ox_proto_generate_nonce(r, &nonce) == FALSE)
+		return HTTP_INTERNAL_SERVER_ERROR;
+
+	char *method = "get";
+	// TODO: restore method from discovery too or generate state before doing discover (and losing startSSO effect)
+	/*
+	const char *content_type = apr_table_get(r->headers_in, "Content-Type");
+	char *method =
+			((r->method_number == M_POST)
+					&& (apr_strnatcmp(content_type,
+							"application/x-www-form-urlencoded") == 0)) ?
+					"form_post" : "redirect";
+	*/
+
+	/* create the state between request/response */
+	json_t *proto_state = json_object();
+	json_object_set_new(proto_state, "original_url", json_string(original_url));
+	json_object_set_new(proto_state, "original_method", json_string(method));
+	json_object_set_new(proto_state, "issuer", json_string(provider->issuer));
+	json_object_set_new(proto_state, "response_type",
+			json_string(provider->response_type));
+	json_object_set_new(proto_state, "nonce", json_string(nonce));
+	json_object_set_new(proto_state, "timestamp",
+			json_integer(apr_time_sec(apr_time_now())));
+	if (provider->response_mode)
+		json_object_set_new(proto_state, "response_mode",
+				json_string(provider->response_mode));
+	if (prompt)
+		json_object_set_new(proto_state, "prompt", json_string(prompt));
+
+	/* get a hash value that fingerprints the browser concatenated with the random input */
+	char *state = ox_get_browser_state_hash(r, nonce);
+
+	/* create state that restores the context when the authorization response comes in; cryptographically bind it to the browser */
+	ox_authorization_request_set_cookie(r, c, state, proto_state);
+
+	/*
+	 * TODO: I'd like to include the nonce all flows, including the "code" and "code token" flows
+	 * but Google does not allow me to do that:
+	 * Error: invalid_request: Parameter not allowed for this message type: nonce
+	 */
+	if ((apr_strnatcmp(provider->issuer, "accounts.google.com") == 0)
+			&& ((ox_util_spaced_string_equals(r->pool,
+					provider->response_type, "code"))
+					|| (ox_util_spaced_string_equals(r->pool,
+							provider->response_type, "code token"))))
+		json_object_del(proto_state, "nonce");
+
+	/*
+	 * printout errors if Cookie settings are not going to work
+	 */
+	apr_uri_t o_uri;
+	memset(&o_uri, 0, sizeof(apr_uri_t));
+	apr_uri_t r_uri;
+	memset(&r_uri, 0, sizeof(apr_uri_t));
+	apr_uri_parse(r->pool, original_url, &o_uri);
+	apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
+	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
+			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
+		ox_error(r,
+				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
+				r_uri.scheme, o_uri.scheme);
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	if (c->cookie_domain == NULL) {
+		if (apr_strnatcmp(o_uri.hostname, r_uri.hostname) != 0) {
+			char *p = strstr(o_uri.hostname, r_uri.hostname);
+			if ((p == NULL) || (apr_strnatcmp(r_uri.hostname, p) != 0)) {
+				ox_error(r,
+						"the URL hostname (%s) of the configured OXRedirectURI does not match the URL hostname of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
+						r_uri.hostname, o_uri.hostname);
+				return HTTP_INTERNAL_SERVER_ERROR;
+			}
+		}
+	} else {
+		char *p = strstr(o_uri.hostname, c->cookie_domain);
+		if ((p == NULL) || (apr_strnatcmp(c->cookie_domain, p) != 0)) {
+			ox_error(r,
+					"the domain (%s) configured in OXCookieDomain does not match the URL hostname (%s) of the URL being accessed (%s): setting \"state\" and \"session\" cookies will not work!!",
+					c->cookie_domain, o_uri.hostname, original_url);
+			return HTTP_INTERNAL_SERVER_ERROR;
+		}
+	}
+
+	/* send off to the OpenID Connect Provider */
+	// TODO: maybe show intermediate/progress screen "redirecting to"
+	return ox_proto_authorization_request(r, provider, login_hint,
+			c->redirect_uri, state, proto_state, id_token_hint,
+			c->provider.requested_acr, auth_request_params);
 }
 
 /*
@@ -1629,7 +1798,7 @@ static int ox_handle_discovery_response(request_rec *r, ox_cfg *c) {
 			&& (provider != NULL)) {
 
 		/* now we've got a selected OP, send the user there to authenticate */
-		return ox_authenticate_user(r, c, provider, target_link_uri,
+		return openid_authenticate_user(r, c, provider, target_link_uri,
 				login_hint, NULL, NULL, auth_request_params);
 	}
 
@@ -1922,7 +2091,7 @@ static int ox_handle_session_management(request_rec *r, ox_cfg *c,
 		if (issuer != NULL)
 			provider = ox_get_provider_for_issuer(r, c, issuer);
 		if ((id_token_hint != NULL) && (provider != NULL)) {
-			return ox_authenticate_user(r, c, provider,
+			return openid_authenticate_user(r, c, provider,
 					apr_psprintf(r->pool, "%s?session=iframe_rp",
 							c->redirect_uri), NULL, id_token_hint, "none", NULL);
 		}
@@ -2123,7 +2292,7 @@ int ox_handle_redirect_uri_request(request_rec *r, ox_cfg *c,
 /*
  * main routine: handle OpenID Connect authentication
  */
-static int ox_check_userid_ox(request_rec *r, ox_cfg *c) {
+static int ox_check_userid_openid(request_rec *r, ox_cfg *c) {
 
 	/* check if this is a sub-request or an initial request */
 	if (ap_is_initial_req(r)) {
@@ -2181,7 +2350,72 @@ static int ox_check_userid_ox(request_rec *r, ox_cfg *c) {
 		return HTTP_UNAUTHORIZED;
 
 	/* no session (regardless of whether it is main or sub-request), go and authenticate the user */
-	return ox_authenticate_user(r, c, NULL, ox_get_current_url(r, c), NULL,
+	return openid_authenticate_user(r, c, NULL, ox_get_current_url(r, c), NULL,
+			NULL, NULL, NULL);
+}
+
+/*
+ * main routine: handle UMA authentication
+ */
+static int ox_check_userid_uma(request_rec *r, ox_cfg *c) {
+
+	/* check if this is a sub-request or an initial request */
+	if (ap_is_initial_req(r)) {
+
+		/* load the session from the request state; this will be a new "empty" session if no state exists */
+		session_rec *session = NULL;
+		ox_session_load(r, &session);
+
+		/* see if the initial request is to the redirect URI; this handles potential logout too */
+		if (ox_util_request_matches_url(r, c->redirect_uri)) {
+
+			/* handle request to the redirect_uri */
+			return ox_handle_redirect_uri_request(r, c, session);
+
+			/* initial request to non-redirect URI, check if we have an existing session */
+		} else if (session->remote_user != NULL) {
+
+			/* set the user in the main request for further (incl. sub-request) processing */
+			r->user = (char *) session->remote_user;
+
+			/* this is initial request and we already have a session */
+			return ox_handle_existing_session(r, c, session);
+
+		}
+		/*
+		 * else: initial request, we have no session and it is not an authorization or
+		 *       discovery response: just hit the default flow for unauthenticated users
+		 */
+	} else {
+
+		/* not an initial request, try to recycle what we've already established in the main request */
+		if (r->main != NULL)
+			r->user = r->main->user;
+		else if (r->prev != NULL)
+			r->user = r->prev->user;
+
+		if (r->user != NULL) {
+
+			/* this is a sub-request and we have a session (headers will have been scrubbed and set already) */
+			ox_debug(r,
+					"recycling user '%s' from initial request for sub-request",
+					r->user);
+
+			return OK;
+		}
+		/*
+		 * else: not initial request, but we could not find a session, so:
+		 * just hit the default flow for unauthenticated users
+		 */
+	}
+
+	ox_dir_cfg *dir_cfg = (ox_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+	if (dir_cfg->return401)
+		return HTTP_UNAUTHORIZED;
+
+	/* no session (regardless of whether it is main or sub-request), go and authenticate the user */
+	return uma_authenticate_user(r, c, NULL, ox_get_current_url(r, c), NULL,
 			NULL, NULL, NULL);
 }
 
@@ -2204,7 +2438,12 @@ int ox_check_user_id(request_rec *r) {
 	/* see if we've configured OpenID Connect user authentication for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect")
 			== 0)
-		return ox_check_userid_ox(r, c);
+		return ox_check_userid_openid(r, c);
+
+	/* see if we've configured UMA user authentication for this request */
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "uma")
+		== 0)
+		return ox_check_userid_uma(r, c);
 
 	/* see if we've configured OAuth 2.0 access control for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0)

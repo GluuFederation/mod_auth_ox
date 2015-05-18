@@ -30,14 +30,14 @@
 
 apr_byte_t oxd_discovery(const char *hostname, int portnum, const char *discovery_url, char *result);
 apr_byte_t oxd_register_client(const char *hostname, int portnum, const char *discovery_url, const char *redirect_url, const char *logout_redirect_url, const char *client_name, char *result);
-int oxd_obtain_pat(const char *hostname, int portnum, const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, char *resp_str);
-int oxd_obtain_aat(const char *hostname, int portnum, const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, char *resp_str);
-int oxd_obtain_rpt(const char *hostname, int portnum, const char *aat_token, const char *am_host, char *resp_str);
+apr_byte_t oxd_check_id_token(const char *hostname, int portnum, const char *discovery_url, const char *id_token, char *result);
+apr_byte_t oxd_obtain_pat(const char *hostname, int portnum, const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, char *result);
+apr_byte_t oxd_register_resource(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *resource_name, const char *scopes, char *result);
+apr_byte_t oxd_obtain_aat(const char *hostname, int portnum, const char *discovery_url, const char *uma_discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, char *result);
+apr_byte_t oxd_obtain_rpt(const char *hostname, int portnum, const char *aat_token, const char *am_host, char *result);
 int oxd_check_rpt_status(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *rpt_token, char *resp_str);
 int oxd_check_rpt_token(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *rpt_token, char *resp_str);
 int oxd_register_ticket(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *am_host, const char *rs_host,  const char *scopes, const char *resource_set_id, char *resp_str);
-int oxd_register_resource(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *resource_name,  const char *scopes, char *resp_str);
 int oxd_authorize_rpt_token(const char *hostname, int portnum, const char *aat_token, const char *rpt_token, const char *am_host, const char *ticket, const char *claims, char *resp_str);
-int oxd_check_id_token(const char *hostname, int portnum, const char *discovery_url, const char *id_token, char *resp_str);
 
 #endif

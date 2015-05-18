@@ -108,7 +108,7 @@ int ox_proto_authorization_request_post_preserve(request_rec *r,
 int ox_proto_authorization_request(request_rec *r,
 		struct ox_provider_t *provider, const char *login_hint,
 		const char *redirect_uri, const char *state, json_t *proto_state,
-		const char *id_token_hint, const char *auth_request_params) {
+		const char *id_token_hint, const char *requested_acr, const char *auth_request_params) {
 
 	/* log some stuff */
 	char *s_value = json_dumps(proto_state, JSON_ENCODE_ANY);
@@ -135,6 +135,11 @@ int ox_proto_authorization_request(request_rec *r,
 			authorization_request, ox_util_escape_string(r, state));
 	authorization_request = apr_psprintf(r->pool, "%s&redirect_uri=%s",
 			authorization_request, ox_util_escape_string(r, redirect_uri));
+	if (requested_acr != NULL)
+	{
+		authorization_request = apr_psprintf(r->pool, "%s&acr_values=%s", 
+				authorization_request, ox_util_escape_string(r, requested_acr));
+	}
 
 	/* add the nonce if set */
 	if (json_object_get(proto_state, "nonce") != NULL)
@@ -865,27 +870,6 @@ static apr_byte_t ox_proto_token_endpoint_request(request_rec *r,
 		{
 			return FALSE;
 		}
-		
-		// Check status of id token
-		token_timeout = oic_check_session(s_cfg, id_token.c_str(), session_id.c_str());
-		if (token_timeout <= 0)
-			return show_error(r, s_cfg, "oxd: OpenID Connect check session failed");
-
-		// Save paraams into memcached
-		Set_Ox_Storage(session_id.c_str(), "session_id", session_tmp.c_str(), time_out);
-		apr_table_set(r->headers_out, "OIC_SESSION_ID", session_tmp.c_str());
-
-		Set_Ox_Storage(session_id.c_str(), "id_token", id_token.c_str(), time_out);
-		apr_table_set(r->headers_out, "OIC_ID_TOKEN", id_token.c_str());
-
-		Set_Ox_Storage(session_id.c_str(), "access_token", access_token.c_str(), time_out);
-		apr_table_set(r->headers_out, "OIC_ACCESS_TOKEN", access_token.c_str());
-
-		Set_Ox_Storage(session_id.c_str(), "scope", scope.c_str(), time_out);
-		apr_table_set(r->headers_out, "OIC_SCOPE", scope.c_str());
-
-		Set_Ox_Storage(session_id.c_str(), "state", state.c_str(), time_out);
-		apr_table_set(r->headers_out, "OIC_STATE", state.c_str());
 	}
 
 	return TRUE;
