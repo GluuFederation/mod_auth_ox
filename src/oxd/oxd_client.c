@@ -372,7 +372,7 @@ error:
 }
 
 apr_byte_t oxd_register_resource(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, \
-				   const char *resource_name, const char *scopes, char *result)
+				   const char *resource_name, char *scopes, char *result)
 {
 	apr_status_t rv;
 	apr_pool_t *mp;
@@ -380,7 +380,7 @@ apr_byte_t oxd_register_resource(const char *hostname, int portnum, const char *
 	char req[BUFSIZE]="";
 	char resp[BUFSIZE]="";
 
-	if (!uma_discovery_url || !pat_token || !resource_name || !hostname || !scopes || (portnum < 0)) {
+	if (!uma_discovery_url || !pat_token || !resource_name || !hostname || (portnum < 0)) {
 			return -1;
 	}
 
@@ -401,9 +401,23 @@ apr_byte_t oxd_register_resource(const char *hostname, int portnum, const char *
 	strcat(req, pat_token);
 	strcat(req, "\",\"name\":\"");
 	strcat(req, resource_name);
-	strcat(req, "\",\"scopes\":[");
-	strcat(req, scopes);
-	strcat(req, "]");
+	strcat(req, "\"");
+	if (scopes != NULL)
+	{
+		char *ptr;
+		strcat(req, ",\"scopes\":[");
+		ptr = strtok(scopes, ",");
+		while (ptr != NULL)
+		{
+			strcat(req, "\"");
+			strcat(req, ptr);
+			strcat(req, "\"");
+			ptr = strtok(NULL, ",");
+			if (ptr != NULL)
+				strcat(req, ",");
+		}
+		strcat(req, "]");
+	}
 	strcat(req, "}}");
 	sprintf(&req[0], "%04lu", strlen(req)-4);
 	req[4] = '{';

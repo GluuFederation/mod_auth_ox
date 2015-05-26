@@ -538,6 +538,10 @@
 				</FileConfiguration>
 			</File>
 			<File
+				RelativePath="..\src\uma.c"
+				>
+			</File>
+			<File
 				RelativePath="..\src\util.c"
 				>
 				<FileConfiguration

@@ -105,7 +105,7 @@ int ox_proto_authorization_request_post_preserve(request_rec *r,
 /*
  * send an OpenID Connect authorization request to the specified provider
  */
-int ox_proto_authorization_request(request_rec *r,
+int openid_proto_authorization_request(request_rec *r,
 		struct ox_provider_t *provider, const char *login_hint,
 		const char *redirect_uri, const char *state, json_t *proto_state,
 		const char *id_token_hint, const char *requested_acr, const char *auth_request_params) {
@@ -176,6 +176,101 @@ int ox_proto_authorization_request(request_rec *r,
 				ox_util_escape_string(r,
 						json_string_value(
 								json_object_get(proto_state, "prompt"))));
+
+	/* add any statically configured custom authorization request parameters */
+	if (provider->auth_request_params != NULL) {
+		authorization_request = apr_psprintf(r->pool, "%s&%s",
+				authorization_request, provider->auth_request_params);
+	}
+
+	/* add any dynamically configured custom authorization request parameters */
+	if (auth_request_params != NULL) {
+		authorization_request = apr_psprintf(r->pool, "%s&%s",
+				authorization_request, auth_request_params);
+	}
+
+	/* preserve POSTed form parameters if enabled */
+	if (apr_strnatcmp(
+			json_string_value(json_object_get(proto_state, "original_method")),
+			"form_post") == 0)
+		return ox_proto_authorization_request_post_preserve(r,
+				authorization_request);
+
+	/* cleanup */
+	json_decref(proto_state);
+
+	/* add the redirect location header */
+	apr_table_add(r->headers_out, "Location", authorization_request);
+
+	/* some more logging */
+	ox_debug(r, "adding outgoing header: Location: %s",
+			authorization_request);
+
+	/* and tell Apache to return an HTTP Redirect (302) message */
+	return HTTP_MOVED_TEMPORARILY;
+}
+
+/*
+ * send an UMA authorization request to the specified provider
+ */
+int uma_proto_authorization_request(request_rec *r,
+		struct ox_provider_t *provider, const char *login_hint,
+		const char *redirect_uri, const char *state, json_t *proto_state,
+		const char *id_token_hint, const char *requested_acr, const char *auth_request_params) {
+
+	/* log some stuff */
+	char *s_value = json_dumps(proto_state, JSON_ENCODE_ANY);
+	ox_debug(r, "enter, issuer=%s, redirect_uri=%s, state=%s, proto_state=%s",
+			provider->issuer, redirect_uri, state, s_value);
+	free(s_value);
+
+	/* assemble the full URL as the authorization request to the OP where we want to redirect to */
+	char *authorization_request = apr_psprintf(r->pool, "%s%s",
+			provider->authorization_endpoint_url,
+			strchr(provider->authorization_endpoint_url, '?') != NULL ?
+					"&" : "?");
+	authorization_request = apr_psprintf(r->pool, "%sresponse_type=%s",
+			authorization_request,
+			ox_util_escape_string(r,
+					json_string_value(
+							json_object_get(proto_state, "response_type"))));
+	authorization_request = apr_psprintf(r->pool, "%s&scope=%s",
+			authorization_request, ox_util_escape_string(r, provider->scope));
+	authorization_request = apr_psprintf(r->pool, "%s&client_id=%s",
+			authorization_request,
+			ox_util_escape_string(r, provider->client_id));
+	authorization_request = apr_psprintf(r->pool, "%s&state=%s",
+			authorization_request, ox_util_escape_string(r, state));
+	authorization_request = apr_psprintf(r->pool, "%s&redirect_uri=%s",
+			authorization_request, ox_util_escape_string(r, redirect_uri));
+
+	/* add the nonce if set */
+	if (json_object_get(proto_state, "nonce") != NULL)
+		authorization_request = apr_psprintf(r->pool, "%s&nonce=%s",
+				authorization_request,
+				ox_util_escape_string(r,
+						json_string_value(
+								json_object_get(proto_state, "nonce"))));
+
+	/* add the response_mode if explicitly set */
+	if (json_object_get(proto_state, "response_mode") != NULL)
+		authorization_request = apr_psprintf(r->pool, "%s&response_mode=%s",
+				authorization_request,
+				ox_util_escape_string(r,
+						json_string_value(
+								json_object_get(proto_state,
+										"response_mode"))));
+
+	/* add the login_hint if provided */
+	if (login_hint != NULL)
+		authorization_request = apr_psprintf(r->pool, "%s&login_hint=%s",
+				authorization_request, ox_util_escape_string(r, login_hint));
+
+	/* add the id_token_hint if provided */
+	if (id_token_hint != NULL)
+		authorization_request = apr_psprintf(r->pool, "%s&id_token_hint=%s",
+				authorization_request,
+				ox_util_escape_string(r, id_token_hint));
 
 	/* add any statically configured custom authorization request parameters */
 	if (provider->auth_request_params != NULL) {

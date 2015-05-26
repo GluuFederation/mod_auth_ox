@@ -62,17 +62,17 @@
 #include "unixd.h"
 #endif
 
-#include "../mod_auth_openidc.h"
+#include "../mod_auth_ox.h"
 
 /* create the cache lock context */
-oidc_cache_mutex_t *oidc_cache_mutex_create(apr_pool_t *pool) {
-	oidc_cache_mutex_t *ctx = apr_pcalloc(pool, sizeof(oidc_cache_mutex_t));
+ox_cache_mutex_t *ox_cache_mutex_create(apr_pool_t *pool) {
+	ox_cache_mutex_t *ctx = apr_pcalloc(pool, sizeof(ox_cache_mutex_t));
 	ctx->mutex = NULL;
 	ctx->mutex_filename = NULL;
 	return ctx;
 }
 
-apr_byte_t oidc_cache_mutex_post_config(server_rec *s, oidc_cache_mutex_t *m,
+apr_byte_t ox_cache_mutex_post_config(server_rec *s, ox_cache_mutex_t *m,
 		const char *type) {
 
 	apr_status_t rv = APR_SUCCESS;
@@ -81,14 +81,14 @@ apr_byte_t oidc_cache_mutex_post_config(server_rec *s, oidc_cache_mutex_t *m,
 	/* construct the mutex filename */
 	apr_temp_dir_get(&dir, s->process->pool);
 	m->mutex_filename = apr_psprintf(s->process->pool,
-			"%s/mod_auth_openidc_%s_mutex.%ld.%pp", dir, type,
+			"%s/mod_auth_ox_%s_mutex.%ld.%pp", dir, type,
 			(long int) getpid(), s);
 
 	/* create the mutex lock */
 	rv = apr_global_mutex_create(&m->mutex, (const char *) m->mutex_filename,
 			APR_LOCK_DEFAULT, s->process->pool);
 	if (rv != APR_SUCCESS) {
-		oidc_serror(s,
+		ox_serror(s,
 				"apr_global_mutex_create failed to create mutex on file %s",
 				m->mutex_filename);
 		return FALSE;
@@ -102,7 +102,7 @@ apr_byte_t oidc_cache_mutex_post_config(server_rec *s, oidc_cache_mutex_t *m,
 	rv = unixd_set_global_mutex_perms(m->mutex);
 #endif
 	if (rv != APR_SUCCESS) {
-		oidc_serror(s,
+		ox_serror(s,
 				"unixd_set_global_mutex_perms failed; could not set permissions ");
 		return FALSE;
 	}
@@ -114,15 +114,15 @@ apr_byte_t oidc_cache_mutex_post_config(server_rec *s, oidc_cache_mutex_t *m,
 /*
  * initialize the cache lock in a child process
  */
-apr_status_t oidc_cache_mutex_child_init(apr_pool_t *p, server_rec *s,
-		oidc_cache_mutex_t *m) {
+apr_status_t ox_cache_mutex_child_init(apr_pool_t *p, server_rec *s,
+		ox_cache_mutex_t *m) {
 
 	/* initialize the lock for the child process */
 	apr_status_t rv = apr_global_mutex_child_init(&m->mutex,
 			(const char *) m->mutex_filename, p);
 
 	if (rv != APR_SUCCESS) {
-		oidc_serror(s,
+		ox_serror(s,
 				"apr_global_mutex_child_init failed to reopen mutex on file %s",
 				m->mutex_filename);
 	}
@@ -133,12 +133,12 @@ apr_status_t oidc_cache_mutex_child_init(apr_pool_t *p, server_rec *s,
 /*
  * global lock
  */
-apr_byte_t oidc_cache_mutex_lock(request_rec *r, oidc_cache_mutex_t *m) {
+apr_byte_t ox_cache_mutex_lock(request_rec *r, ox_cache_mutex_t *m) {
 
 	apr_status_t rv = apr_global_mutex_lock(m->mutex);
 
 	if (rv != APR_SUCCESS) {
-		oidc_error(r, "apr_global_mutex_lock() failed [%d]", rv);
+		ox_error(r, "apr_global_mutex_lock() failed [%d]", rv);
 		return FALSE;
 	}
 
@@ -148,12 +148,12 @@ apr_byte_t oidc_cache_mutex_lock(request_rec *r, oidc_cache_mutex_t *m) {
 /*
  * global unlock
  */
-apr_byte_t oidc_cache_mutex_unlock(request_rec *r, oidc_cache_mutex_t *m) {
+apr_byte_t ox_cache_mutex_unlock(request_rec *r, ox_cache_mutex_t *m) {
 
 	apr_status_t rv = apr_global_mutex_unlock(m->mutex);
 
 	if (rv != APR_SUCCESS) {
-		oidc_error(r, "apr_global_mutex_unlock() failed [%d]", rv);
+		ox_error(r, "apr_global_mutex_unlock() failed [%d]", rv);
 		return FALSE;
 	}
 
@@ -163,14 +163,14 @@ apr_byte_t oidc_cache_mutex_unlock(request_rec *r, oidc_cache_mutex_t *m) {
 /*
  * destroy mutex
  */
-apr_byte_t oidc_cache_mutex_destroy(server_rec *s, oidc_cache_mutex_t *m) {
+apr_byte_t ox_cache_mutex_destroy(server_rec *s, ox_cache_mutex_t *m) {
 
 	apr_status_t rv = APR_SUCCESS;
 
 	if (m->mutex != NULL) {
 		rv = apr_global_mutex_destroy(m->mutex);
 		if (rv != APR_SUCCESS) {
-			oidc_swarn(s, "apr_global_mutex_destroy failed: [%d]", rv);
+			ox_swarn(s, "apr_global_mutex_destroy failed: [%d]", rv);
 		}
 		m->mutex = NULL;
 	}

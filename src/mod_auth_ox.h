@@ -360,7 +360,8 @@ int ox_oauth_check_userid(request_rec *r, ox_cfg *c);
 
 // ox_proto.c
 
-int ox_proto_authorization_request(request_rec *r, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *requested_acr, const char *auth_request_params);
+int openid_proto_authorization_request(request_rec *r, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *requested_acr, const char *auth_request_params);
+int uma_proto_authorization_request(request_rec *r, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *requested_acr, const char *auth_request_params);
 apr_byte_t ox_proto_is_post_authorization_response(request_rec *r, ox_cfg *cfg);
 apr_byte_t ox_proto_is_redirect_authorization_response(request_rec *r, ox_cfg *cfg);
 apr_byte_t ox_proto_resolve_code(request_rec *r, ox_cfg *cfg, ox_provider_t *provider, const char *code, char **id_token, char **access_token, char **token_type, int *expires_in, char **refresh_token);
