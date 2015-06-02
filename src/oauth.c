@@ -109,6 +109,46 @@ static apr_byte_t ox_oauth_validate_access_token(request_rec *r, ox_cfg *c,
 					dir_cfg->pass_cookies);
 }
 
+static apr_byte_t uma_oauth_validate_access_token(request_rec *r, ox_cfg *c,
+		const char *token, const char **response) {
+
+	/* get a handle to the directory config */
+	uma_dir_cfg *dir_cfg = (uma_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+
+	/* assemble parameters to call the token endpoint for validation */
+	apr_table_t *params = apr_table_make(r->pool, 4);
+
+	/* add any configured extra static parameters to the introspection endpoint */
+	ox_util_table_add_query_encoded_params(r->pool, params,
+			c->oauth.introspection_endpoint_params);
+
+	/* add the access_token itself */
+	apr_table_addn(params, c->oauth.introspection_token_param_name, token);
+
+	/* see if we want to do basic auth or post-param-based auth */
+	const char *basic_auth = NULL;
+	if ((c->oauth.client_id != NULL) && (c->oauth.client_secret != NULL)) {
+		if ((c->oauth.introspection_endpoint_auth != NULL)
+				&& (apr_strnatcmp(c->oauth.introspection_endpoint_auth,
+						"client_secret_post") == 0)) {
+			apr_table_addn(params, "client_id", c->oauth.client_id);
+			apr_table_addn(params, "client_secret", c->oauth.client_secret);
+		} else {
+			basic_auth = apr_psprintf(r->pool, "%s:%s", c->oauth.client_id,
+					c->oauth.client_secret);
+		}
+	}
+
+	/* call the endpoint with the constructed parameter set and return the resulting response */
+	return apr_strnatcmp(c->oauth.introspection_endpoint_method, "GET") == 0 ?
+			ox_util_http_get(r, c->oauth.introspection_endpoint_url, params,
+					dir_cfg->pass_cookies) :
+			ox_util_http_post_form(r, c->oauth.introspection_endpoint_url,
+					params, basic_auth, NULL, c->oauth.ssl_validate_server,
+					dir_cfg->pass_cookies);
+}
+
 /*
  * get the authorization header that should contain a bearer token
  */
@@ -137,6 +177,39 @@ static apr_byte_t ox_oauth_get_bearer_token(request_rec *r,
 
 	/* copy the result in to the access_token */
 	*access_token = apr_pstrdup(r->pool, auth_line);
+
+	/* log some stuff */
+	ox_debug(r, "bearer token: %s", *access_token);
+
+	return TRUE;
+}
+
+static apr_byte_t uma_oauth_get_bearer_token(request_rec *r,
+		const char **access_token) {
+
+	/* get the authorization header */
+	const char *auth_line;
+	auth_line = apr_table_get(r->headers_in, "Authorization");
+	if (!auth_line) {
+		ox_debug(r, "no authorization header found");
+		return FALSE;
+	}
+
+	/* look for the Bearer keyword */
+	if (apr_strnatcasecmp(ap_getword(r->pool, &auth_line, ' '), "Bearer")) {
+		ox_error(r, "client used unsupported authentication scheme: %s",
+				r->uri);
+		return FALSE;
+	}
+
+	/* skip any spaces after the Bearer keyword */
+	while (apr_isspace(*auth_line)) {
+		auth_line++;
+	}
+
+	/* copy the result in to the access_token */
+	*access_token = apr_pstrdup(r->pool, auth_line);
+	session_token = apr_pstrdup(r->pool, session_line);
 
 	/* log some stuff */
 	ox_debug(r, "bearer token: %s", *access_token);

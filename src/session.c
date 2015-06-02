@@ -401,6 +401,36 @@ static apr_status_t ox_session_save_cache(request_rec *r, session_rec *z) {
 	return APR_SUCCESS;
 }
 
+static apr_status_t uma_session_save_cache(request_rec *r, session_rec *z) {
+	uma_cfg *c = (uma_cfg *)ap_get_module_config(r->server->module_config,
+			&auth_ox_module);
+	uma_dir_cfg *d = (uma_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+
+	char key[APR_UUID_FORMATTED_LENGTH + 1];
+	apr_uuid_format((char *) &key, z->uuid);
+
+	if (z->encoded && z->encoded[0]) {
+
+		/* set the uuid in the cookie */
+		ox_util_set_cookie(r, d->cookie, key, -1);
+
+		/* store the string-encoded session in the cache */
+		c->cache->set(r, UMA_CACHE_SECTION_SESSION, key, z->encoded,
+				z->expiry);
+
+	} else {
+
+		/* clear the cookie */
+		ox_util_set_cookie(r, d->cookie, "", 0);
+
+		/* remove the session from the cache */
+		c->cache->set(r, UMA_CACHE_SECTION_SESSION, key, NULL, 0);
+	}
+
+	return APR_SUCCESS;
+}
+
 static apr_status_t ox_session_load_cookie(request_rec *r, session_rec *z) {
 	ox_dir_cfg *d = (ox_dir_cfg *)ap_get_module_config(r->per_dir_config,
 			&auth_ox_module);
@@ -418,8 +448,38 @@ static apr_status_t ox_session_load_cookie(request_rec *r, session_rec *z) {
 	return APR_SUCCESS;
 }
 
+static apr_status_t uma_session_load_cookie(request_rec *r, session_rec *z) {
+	uma_dir_cfg *d = (uma_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+
+	char *cookieValue = ox_util_get_cookie(r, d->cookie);
+	if (cookieValue != NULL) {
+		if (ox_base64url_decode_decrypt_string(r, (char **) &z->encoded,
+				cookieValue) <= 0) {
+			//ox_util_set_cookie(r, d->cookie, "");
+			ox_warn(r, "cookie value possibly corrupted");
+			return APR_EGENERAL;
+		}
+	}
+
+	return APR_SUCCESS;
+}
+
 static apr_status_t ox_session_save_cookie(request_rec *r, session_rec *z) {
 	ox_dir_cfg *d = (ox_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+
+	char *cookieValue = "";
+	if (z->encoded && z->encoded[0]) {
+		ox_encrypt_base64url_encode_string(r, &cookieValue, z->encoded);
+	}
+	ox_util_set_cookie(r, d->cookie, cookieValue, -1);
+
+	return APR_SUCCESS;
+}
+
+static apr_status_t uma_session_save_cookie(request_rec *r, session_rec *z) {
+	uma_dir_cfg *d = (uma_dir_cfg *)ap_get_module_config(r->per_dir_config,
 			&auth_ox_module);
 
 	char *cookieValue = "";
@@ -495,6 +555,64 @@ static apr_status_t ox_session_load_22(request_rec *r, session_rec **zz) {
 	return APR_SUCCESS;
 }
 
+static apr_status_t uma_session_load_22(request_rec *r, session_rec **zz) {
+
+	ox_cfg *c = (ox_cfg *)ap_get_module_config(r->server->module_config,
+			&auth_ox_module);
+
+	/* first see if this is a sub-request and it was set already in the main request */
+	if (((*zz) = (session_rec *) uma_request_state_get(r, "session")) != NULL) {
+		ox_debug(r, "loading session from request state");
+		return APR_SUCCESS;
+	}
+
+	/* allocate space for the session object and fill it */
+	session_rec *z = (*zz = (session_rec *)apr_pcalloc(r->pool, sizeof(session_rec)));
+	z->pool = r->pool;
+
+	/* get a new uuid for this session */
+	z->remote_user = NULL;
+	z->encoded = NULL;
+	z->entries = apr_table_make(z->pool, 10);
+
+	apr_status_t rc = APR_SUCCESS;
+	if (c->session_type == OX_SESSION_TYPE_22_SERVER_CACHE) {
+		/* load the session from the cache */
+		rc = uma_session_load_cache(r, z);
+	} else if (c->session_type == OX_SESSION_TYPE_22_CLIENT_COOKIE) {
+		/* load the session from a self-contained cookie */
+		rc = ox_session_load_cookie(r, z);
+	} else {
+		ox_error(r, "ox_session_load_22: unknown session type: %d",
+				c->session_type);
+		rc = APR_EGENERAL;
+	}
+
+	/* see if it worked out */
+	if (rc != APR_SUCCESS)
+		return rc;
+
+	/* yup, now decode the info */
+	if (ox_session_identity_decode(r, z) != APR_SUCCESS)
+		return APR_EGENERAL;
+
+	/* check whether it has expired */
+	if (apr_time_now() > z->expiry) {
+
+		ox_warn(r, "session restored from cache has expired");
+		apr_table_clear(z->entries);
+		z->expiry = 0;
+		z->encoded = NULL;
+
+		return APR_EGENERAL;
+	}
+
+	/* store this session in the request context, so it is available to sub-requests */
+	ox_request_state_set(r, "session", (const char *) z);
+
+	return APR_SUCCESS;
+}
+
 /*
  * save a session to the cache
  */
@@ -524,10 +642,50 @@ static apr_status_t ox_session_save_22(request_rec *r, session_rec *z) {
 	return rc;
 }
 
+static apr_status_t uma_session_save_22(request_rec *r, session_rec *z) {
+
+	ox_cfg *c = (ox_cfg *)ap_get_module_config(r->server->module_config,
+			&auth_ox_module);
+
+	/* encode the actual state in to the encoded string */
+	uma_session_identity_encode(r, z);
+
+	/* store this session in the request context, so it is available to sub-requests as a quicker-than-file-backend cache */
+	ox_request_state_set(r, "session", (const char *) z);
+
+	apr_status_t rc = APR_SUCCESS;
+	if (c->session_type == OX_SESSION_TYPE_22_SERVER_CACHE) {
+		/* store the session in the cache */
+		rc = uma_session_save_cache(r, z);
+	} else if (c->session_type == OX_SESSION_TYPE_22_CLIENT_COOKIE) {
+		/* store the session in a self-contained cookie */
+		rc = ox_session_save_cookie(r, z);
+	} else {
+		ox_error(r, "unknown session type: %d", c->session_type);
+		rc = APR_EGENERAL;
+	}
+
+	if (r->herders_out)
+	{
+		rc = uma_session_store_cache(r, z);
+	}
+
+	return rc;
+}
+
 /*
  * get a value from the session based on the name from a name/value pair
  */
 static apr_status_t ox_session_get_22(request_rec *r, session_rec *z,
+		const char *key, const char **value) {
+
+	/* just return the value for the key */
+	*value = apr_table_get(z->entries, key);
+
+	return OK;
+}
+
+static apr_status_t uma_session_get_22(request_rec *r, session_rec *z,
 		const char *key, const char **value) {
 
 	/* just return the value for the key */
@@ -551,6 +709,18 @@ static apr_status_t ox_session_set_22(request_rec *r, session_rec *z,
 	return OK;
 }
 
+static apr_status_t uma_session_set_22(request_rec *r, session_rec *z,
+		const char *key, const char *value) {
+
+	/* only set it if non-NULL, otherwise delete the entry */
+	if (value) {
+		apr_table_set(z->entries, key, value);
+	} else {
+		apr_table_unset(z->entries, key);
+	}
+	return OK;
+}
+
 /*
  * session initialization for pre-2.4
  */
@@ -561,6 +731,17 @@ apr_status_t ox_session_init() {
 		ap_session_get_fn = ox_session_get_22;
 		ap_session_set_fn = ox_session_set_22;
 		ap_session_save_fn = ox_session_save_22;
+	}
+	return OK;
+}
+
+apr_status_t uma_session_init() {
+	if (!ap_session_load_fn || !ap_session_get_fn || !ap_session_set_fn
+			|| !ap_session_save_fn) {
+		ap_session_load_fn = uma_session_load_22;
+		ap_session_get_fn = uma_session_get_22;
+		ap_session_set_fn = uma_session_set_22;
+		ap_session_save_fn = uma_session_save_22;
 	}
 	return OK;
 }

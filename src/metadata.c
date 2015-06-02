@@ -561,6 +561,58 @@ static apr_byte_t ox_metadata_file_write(request_rec *r, const char *path,
 }
 
 /*
+ * write JSON metadata to a file
+ */
+static apr_byte_t uma_metadata_file_write(request_rec *r, const char *path,
+		const char *data) {
+
+	// TODO: completely erase the contents of the file if it already exists....
+
+	apr_file_t *fd = NULL;
+	apr_status_t rc = APR_SUCCESS;
+	apr_size_t bytes_written = 0;
+	char s_err[128];
+
+	/* try to open the metadata file for writing, creating it if it does not exist */
+	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE | APR_FOPEN_CREATE),
+			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+		ox_error(r, "file \"%s\" could not be opened (%s)", path,
+				apr_strerror(rc, s_err, sizeof(s_err)));
+		return FALSE;
+	}
+
+	/* calculate the length of the data, which is a string length */
+	apr_size_t len = strlen(data);
+
+	/* (blocking) write the number of bytes in the buffer */
+	rc = apr_file_write_full(fd, data, len, &bytes_written);
+
+	/* check for a system error */
+	if (rc != APR_SUCCESS) {
+		ox_error(r, "could not write to: \"%s\" (%s)", path,
+				apr_strerror(rc, s_err, sizeof(s_err)));
+		return FALSE;
+	}
+
+	/* check that all bytes from the header were written */
+	if (bytes_written != len) {
+		ox_error(r,
+				"could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
+				path, bytes_written, len);
+		return FALSE;
+	}
+
+	/* unlock and close the written file */
+	apr_file_unlock(fd);
+	apr_file_close(fd);
+
+	ox_debug(r, "file \"%s\" written; number of bytes (%" APR_SIZE_T_FMT ")",
+			path, len);
+
+	return TRUE;
+}
+
+/*
  * register the client with the OP using Dynamic Client Registration
  */
 static apr_byte_t ox_metadata_client_register(request_rec *r, ox_cfg *cfg,
@@ -720,6 +772,40 @@ static apr_byte_t ox_metadata_jwks_retrieve_and_cache(request_rec *r,
 }
 
 /*
+ * helper function to get the JWKs for the specified issuer
+ */
+static apr_byte_t uma_metadata_jwks_retrieve_and_cache(request_rec *r,
+		ox_cfg *cfg, const ox_jwks_uri_t *jwks_uri, json_t **j_jwks) {
+
+	const char *response = NULL;
+
+	/* get a handle to the directory config */
+	uma_dir_cfg *dir_cfg = (uma_dir_cfg *)ap_get_module_config(r->per_dir_config,
+			&auth_ox_module);
+
+	/* no valid provider metadata, get it at the specified URL with the specified parameters */
+	if (uma_util_http_get(r, jwks_uri->url, NULL, NULL,
+			NULL, jwks_uri->ssl_validate_server, &response, cfg->http_timeout_long,
+			cfg->outgoing_proxy, dir_cfg->pass_cookies) == FALSE)
+		return FALSE;
+
+	/* decode and see if it is not an error response somehow */
+	if (ox_util_decode_json_and_check_error(r, response, j_jwks) == FALSE)
+		return FALSE;
+
+	/* check to see if it is valid metadata */
+	if (ox_metadata_jwks_is_valid(r, jwks_uri, *j_jwks) == FALSE)
+		return FALSE;
+
+	/* store the JWKs in the cache */
+	cfg->cache->set(r, OX_CACHE_SECTION_JWKS,
+			ox_metadata_jwks_cache_key(r, jwks_uri->url), response,
+			apr_time_now() + apr_time_from_sec(jwks_uri->refresh_interval));
+
+	return TRUE;
+}
+
+/*
  * return JWKs for the specified issuer
  */
 apr_byte_t ox_metadata_jwks_get(request_rec *r, ox_cfg *cfg,
@@ -750,6 +836,42 @@ apr_byte_t ox_metadata_jwks_get(request_rec *r, ox_cfg *cfg,
 
 	/* decode and see if it is not an error response somehow */
 	if (ox_util_decode_json_and_check_error(r, value, j_jwks) == FALSE)
+		return FALSE;
+
+	return TRUE;
+}
+
+/*
+ * return JWKs for the specified issuer
+ */
+apr_byte_t ox_metadata_jwks_get(request_rec *r, ox_cfg *cfg,
+		const ox_jwks_uri_t *jwks_uri, json_t **j_jwks, apr_byte_t *refresh) {
+
+	ox_debug(r, "enter, jwks_uri=%s, refresh=%d", jwks_uri->url, *refresh);
+
+	/* see if we need to do a forced refresh */
+	if (*refresh == TRUE) {
+		ox_debug(r, "doing a forced refresh of the JWKs from URI \"%s\"",
+				jwks_uri->url);
+		if (ox_metadata_jwks_retrieve_and_cache(r, cfg, jwks_uri,
+				j_jwks) == TRUE)
+			return TRUE;
+		// else: fallback on any cached JWKs
+	}
+
+	/* see if the JWKs is cached */
+	const char *value = NULL;
+	cfg->cache->get(r, OX_CACHE_SECTION_JWKS,
+			ox_metadata_jwks_cache_key(r, jwks_uri->url), &value);
+
+	if (value == NULL) {
+		/* it is non-existing or expired: do a forced refresh */
+		*refresh = TRUE;
+		return ox_metadata_jwks_retrieve_and_cache(r, cfg, jwks_uri, j_jwks);
+	}
+
+	/* decode and see if it is not an error response somehow */
+	if (uma_util_decode_json_and_check_error(r, value, j_jwks) == FALSE)
 		return FALSE;
 
 	return TRUE;
