@@ -105,7 +105,7 @@ int ox_proto_authorization_request_post_preserve(request_rec *r,
 /*
  * send an OpenID Connect authorization request to the specified provider
  */
-int openid_proto_authorization_request(request_rec *r,
+int openid_proto_authorization_request(request_rec *r, ox_cfg *c,
 		struct ox_provider_t *provider, const char *login_hint,
 		const char *redirect_uri, const char *state, json_t *proto_state,
 		const char *id_token_hint, const char *requested_acr, const char *auth_request_params) {
@@ -202,6 +202,10 @@ int openid_proto_authorization_request(request_rec *r,
 	/* add the redirect location header */
 	apr_table_add(r->headers_out, "Location", authorization_request);
 
+	/* save the original url */
+	c->cache->set(r, OX_CACHE_SECTION_PROVIDER, state, ox_get_current_url(r, c),
+		apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+
 	/* some more logging */
 	ox_debug(r, "adding outgoing header: Location: %s",
 			authorization_request);
@@ -243,6 +247,12 @@ int uma_proto_authorization_request(request_rec *r,
 			authorization_request, ox_util_escape_string(r, state));
 	authorization_request = apr_psprintf(r->pool, "%s&redirect_uri=%s",
 			authorization_request, ox_util_escape_string(r, redirect_uri));
+	if (requested_acr != NULL)
+	{
+		authorization_request = apr_psprintf(r->pool, "%s&acr_values=%s", 
+			authorization_request, ox_util_escape_string(r, requested_acr));
+	}
+
 
 	/* add the nonce if set */
 	if (json_object_get(proto_state, "nonce") != NULL)
@@ -962,9 +972,7 @@ static apr_byte_t ox_proto_token_endpoint_request(request_rec *r,
 	{
 		char resp_str[8192];
 		if (oxd_check_id_token(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, cfg->provider.openid_provider, *id_token, resp_str) == FALSE)
-		{
 			return FALSE;
-		}
 	}
 
 	return TRUE;
@@ -1535,6 +1543,17 @@ static apr_byte_t ox_proto_resolve_code_and_validate_response(request_rec *r,
 	if (refresh_token != NULL) {
 		apr_table_set(params, "refresh_token", refresh_token);
 	}
+
+	const char *session_id = apr_table_get(params, "session_id");
+	const char *scope = apr_table_get(params, "scope");
+	const char *state = apr_table_get(params, "state");
+
+	// Save params as environment variables
+	if (session_id) apr_table_set(r->headers_out, "OX_SESSION_ID", session_id);
+	if (id_token) apr_table_set(r->headers_out, "OX_ID_TOKEN", id_token);
+	if (access_token) apr_table_set(r->headers_out, "OX_ACCESS_TOKEN", access_token);
+	if (scope) apr_table_set(r->headers_out, "OX_SCOPE", scope);
+	if (state) apr_table_set(r->headers_out, "OX_STATE", state);
 
 	return TRUE;
 }

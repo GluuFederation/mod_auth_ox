@@ -1497,12 +1497,19 @@ static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 	memset(&r_uri, 0, sizeof(apr_uri_t));
 	apr_uri_parse(r->pool, original_url, &o_uri);
 	apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
+	// 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
+	// 			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
+	// 		ox_error(r,
+	// 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
+	// 				r_uri.scheme, o_uri.scheme);
+	// 		return HTTP_INTERNAL_SERVER_ERROR;
+	// 	}
 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
-			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
-		ox_error(r,
+		&& (apr_strnatcmp(r_uri.scheme, "http") == 0)) {
+			ox_error(r,
 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
 				r_uri.scheme, o_uri.scheme);
-		return HTTP_INTERNAL_SERVER_ERROR;
+			return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	if (c->cookie_domain == NULL) {
@@ -1527,7 +1534,7 @@ static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 
 	/* send off to the OpenID Connect Provider */
 	// TODO: maybe show intermediate/progress screen "redirecting to"
-	return openid_proto_authorization_request(r, provider, login_hint,
+	return openid_proto_authorization_request(r, c, provider, login_hint,
 			c->redirect_uri, state, proto_state, id_token_hint,
 			c->provider.requested_acr, auth_request_params);
 }
@@ -1612,12 +1619,19 @@ static int uma_authenticate_user(request_rec *r, ox_cfg *c,
 	memset(&r_uri, 0, sizeof(apr_uri_t));
 	apr_uri_parse(r->pool, original_url, &o_uri);
 	apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
+// 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
+// 			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
+// 		ox_error(r,
+// 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
+// 				r_uri.scheme, o_uri.scheme);
+// 		return HTTP_INTERNAL_SERVER_ERROR;
+// 	}
 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
-			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
-		ox_error(r,
+		&& (apr_strnatcmp(r_uri.scheme, "http") == 0)) {
+			ox_error(r,
 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
 				r_uri.scheme, o_uri.scheme);
-		return HTTP_INTERNAL_SERVER_ERROR;
+			return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	if (c->cookie_domain == NULL) {
@@ -2289,88 +2303,6 @@ int ox_handle_redirect_uri_request(request_rec *r, ox_cfg *c,
 					r->args), HTTP_INTERNAL_SERVER_ERROR);
 }
 
-int ox_decode_base64(const unsigned char *in, long isize, unsigned char **out, long *osize, long max_size)
-{
-	long l;
-	long o_pos = 0;
-
-	unsigned char decode_alph[255];
-
-	for (l = 0; l < 64; l++)
-		decode_alph[base64_alph[l]] = (unsigned char)l;
-
-	*out = (unsigned char *)malloc(isize);
-
-	l = 0;
-	for (;;)
-	{
-		if ((max_size != -1) && (o_pos >= max_size))
-			break;  /* we have all needed data */
-
-		if ((l + 3) >= isize)
-			break;
-
-		if ((in[l] == 0x0A) || (in[l] == 0x0D) || (in[l] == ' '))
-		{
-			l++;
-			continue;
-		}
-
-		(*out)[o_pos++] = (decode_alph[in[l]] << 2) | ((decode_alph[in[l + 1]] & 0xf0) >> 4);
-		if (in[l + 2] != '=')
-			(*out)[o_pos++] = ((decode_alph[in[l + 1]] & 0x0f) << 4) | ((decode_alph[in[l + 2]] & 0xfc) >> 2);
-
-		if (in[l + 3] != '=')
-			(*out)[o_pos++] = ((decode_alph[in[l + 2]] & 0x03) << 6) | decode_alph[in[l + 3]];
-
-		l += 4;
-	}
-
-	*osize = o_pos;
-	*out = (unsigned char *)realloc(*out, *osize);
-
-	return 0;
-} /* decode_base64() */
-
-static inline bool ox_isrfc3986unreserved(int c) {
-	if(c<'-') return false;
-	if(c<='.') return true;
-	if(c<'0') return false; if(c<='9') return true;
-	if(c<'A') return false; if(c<='Z') return true;
-	if(c<'_') return false;
-	if(c=='_') return true;
-	if(c<'a') return false; if(c<='z') return true;
-	if(c=='~') return true;
-	return false;
-}
-
-string ox_url_encode(const string& str) {
-	string rv;
-	for_each(str.begin(),str.end(),
-		__url_encoder(rv));
-	return rv;
-}
-
-string ox_attr_escape(const string& str) {
-	static const char *unsafechars = "<>&\n\"'";
-	string rv;
-	string::size_type p=0;
-	while(true) {
-		string::size_type us = str.find_first_of(unsafechars,p);
-		if(us==string::npos) {
-			if(p!=str.length())
-				rv.append(str,p,str.length()-p);
-			return rv;
-		}
-		rv.append(str,p,us-p);
-		rv += "&#";
-		rv += long_to_string((long)str[us]);
-		rv += ';';
-		p = us+1;
-	}
-}
-
-
 /*
  * main routine: handle OpenID Connect authentication
  */
@@ -2501,6 +2433,37 @@ static int ox_check_userid_uma(request_rec *r, ox_cfg *c) {
 			NULL, NULL, NULL);
 }
 
+// #define BIGIP_HTTPS_NOTE                "bigip-https"
+// #define BIGIP_HTTPS_ON                  "on"
+// static int ssl_is_https(conn_rec *c) {
+// 	const char *https;
+// 	https = apr_table_get(c->notes, BIGIP_HTTPS_NOTE);
+// 	return (https) && (0 == strcmp(https, BIGIP_HTTPS_ON));
+// }
+// // Get the full URI of the request_rec's request location 
+// static void full_uri(request_rec *r, char **result, char *return_uri=NULL, bool clean_params=false) {
+// 	apr_port_t i_port = ap_get_server_port(r);
+// 	apr_uri_t r_uri;
+// 	memset(&r_uri, 0, sizeof(apr_uri_t));
+// 	apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
+// 	// Fetch the APR function for determining if we are looking at an https URL
+// 	std::string prefix = ssl_is_https(r->connection) ? "https://" : "http://";
+// 	char *port = apr_psprintf(r->pool, "%lu", (unsigned long) i_port);
+// 	std::string s_port = (i_port == 80 || i_port == 443) ? "" : ":" + std::string(port);
+// 
+// 	std::string args;
+// 	if(clean_params) {
+// 		opkele::params_t params;
+// 		if(r->args != NULL) params = modox::parse_query_string(std::string(r->args));
+// 		modox::remove_openid_vars(params);
+// 		args = params.append_query("", "");
+// 	} else {
+// 		args = (r->args == NULL) ? "" : "?" + std::string(r->args);
+// 	}
+// 
+// 	result = prefix + hostname + s_port + uri + args;
+// }
+
 /*
  * generic Apache authentication hook for this module: dispatches to OpenID Connect or OAuth 2.0 specific routines
  */
@@ -2525,7 +2488,7 @@ int ox_check_user_id(request_rec *r) {
 	/* see if we've configured UMA user authentication for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "uma")
 		== 0)
-		return uma_session(r, c);
+		return ox_check_userid_uma(r, c);
 
 	/* see if we've configured OAuth 2.0 access control for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0)
