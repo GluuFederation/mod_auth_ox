@@ -173,7 +173,7 @@ apr_byte_t oxd_register_client(const char *hostname, int portnum, \
 
 	if ((discovery_url == NULL) || 
 		(redirect_url == NULL) || 
-		(logout_redirect_url == NULL) || 
+//		(logout_redirect_url == NULL) || 
 		(client_name == NULL) || 
 		(result == NULL) || 
 		(hostname == NULL) || 
@@ -196,8 +196,11 @@ apr_byte_t oxd_register_client(const char *hostname, int portnum, \
 	strcat(req, "/.well-known/openid-configuration");
 	strcat(req, "\",\"redirect_url\":\"");
 	strcat(req, redirect_url);
-	strcat(req, "\",\"logout_redirect_url\":\"");
-	strcat(req, logout_redirect_url);
+	if (logout_redirect_url != NULL)
+	{
+		strcat(req, "\",\"logout_redirect_url\":\"");
+		strcat(req, logout_redirect_url);
+	}
 	strcat(req, "\",\"client_name\":\"");
 	strcat(req, client_name);
 	strcat(req, "\"}}");

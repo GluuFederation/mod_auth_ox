@@ -59,6 +59,7 @@
 #include <http_log.h>
 
 #include "mod_auth_ox.h"
+
 #include "oxd/oxd_client.h"
 
 #ifdef WIN32
@@ -781,20 +782,6 @@ apr_byte_t openid_metadata_provider_retrieve(request_rec *r, ox_cfg *cfg,
 		(*response) = (char *)apr_pcalloc(r->pool, strlen(resp_str)+1);
 		memcpy((void *)(*response), resp_str, strlen(resp_str));
 		((char *)(*response))[strlen(resp_str)] = 0;
-
-		json_t *j_clientinfo;
-		oxd_register_client(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum,
-			cfg->provider.openid_provider, cfg->redirect_uri, cfg->provider.logout_url, cfg->provider.client_name, resp_str);
-		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
-			return FALSE;
-		if (cfg->provider.client_id == NULL)
-			ox_json_object_get_string(r->pool, j_clientinfo, "client_id", &cfg->provider.client_id, NULL);
-		if (cfg->provider.client_secret == NULL)
-			ox_json_object_get_string(r->pool, j_clientinfo, "client_secret", &cfg->provider.client_secret, NULL);
-		if (cfg->provider.client_credit_path != NULL)
-			json_dump_file(j_clientinfo, cfg->provider.client_credit_path, JSON_ENCODE_ANY);
-		
-		json_decref(j_clientinfo);
 	}
 	else 
 	{

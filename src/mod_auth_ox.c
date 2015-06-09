@@ -76,6 +76,8 @@
 
 #include "mod_auth_ox.h"
 
+#include "oxd/oxd_client.h"
+
 // TODO:
 // - sort out ox_cfg vs. ox_dir_cfg stuff
 // - rigid input checking on discovery responses
@@ -203,32 +205,75 @@ static apr_byte_t openid_provider_static_config(request_rec *r, ox_cfg *c,
 	const char *s_json = NULL;
 
 	/* see if we should configure a static provider based on external (cached) metadata */
-	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
-		*provider = &c->provider;
-		return TRUE;
-	}
+// 	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
+// 		*provider = &c->provider;
+// 		return TRUE;
+// 	}
 
-	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.metadata_url,
+	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.openid_provider,
 			&s_json);
 
 	if (s_json == NULL) {
 
 		if (openid_metadata_provider_retrieve(r, c, NULL,
-				c->provider.metadata_url, &j_provider, &s_json) == FALSE) {
+				c->provider.openid_provider, &j_provider, &s_json) == FALSE) {
 			ox_error(r, "could not retrieve metadata from url: %s",
-					c->provider.metadata_url);
+					c->provider.openid_provider);
 			return FALSE;
 		}
 
 		// TODO: make the expiry configurable
-		c->cache->set(r, OX_CACHE_SECTION_PROVIDER, c->provider.metadata_url,
+		c->cache->set(r, OX_CACHE_SECTION_PROVIDER, c->provider.openid_provider,
 				s_json,
 				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
-
 	} else {
 
 		/* correct parsing and validation was already done when it was put in the cache */
 		j_provider = json_loads(s_json, 0, 0);
+	}
+
+	{
+		char client_id_key[128];
+		char client_secret_key[128];
+		apr_byte_t ret;
+
+		sprintf(client_id_key, "%s_id", c->provider.openid_provider);
+		sprintf(client_secret_key, "%s_secret", c->provider.openid_provider);
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, client_id_key, (const char **)&c->provider.client_id);
+		if (ret == FALSE) c->provider.client_id = NULL;
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, (const char **)&c->provider.client_secret);
+		if (ret == FALSE) c->provider.client_secret = NULL;
+
+		if ((c->provider.client_id == NULL) || (c->provider.client_secret == NULL))
+		{
+			char resp_str[8192];
+			int expires_at, issued_at;
+			json_t *j_clientinfo;
+			oxd_register_client(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
+				c->provider.openid_provider, c->redirect_uri, c->provider.logout_url, c->provider.client_name, resp_str);
+			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+				return FALSE;
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_id", &c->provider.client_id, NULL);
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_secret", &c->provider.client_secret, NULL);
+			ox_json_object_get_int(r->pool, j_clientinfo, "client_secret_expires_at", &expires_at, 0);
+			ox_json_object_get_int(r->pool, j_clientinfo, "client_id_issued_at", &issued_at, 0);
+
+			/* save client_id and client_secret into memcache */
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_id_key, c->provider.client_id, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, c->provider.client_secret, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			if (c->provider.client_credit_path != NULL)
+				json_dump_file(j_clientinfo, c->provider.client_credit_path, JSON_ENCODE_ANY);
+			json_decref(j_clientinfo);
+		}
+		else
+		{
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_id_key, c->provider.client_id, 
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key,	c->provider.client_secret,	
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+		}
 	}
 
 	*provider = (ox_provider_t *)apr_pcalloc(r->pool, sizeof(ox_provider_t));
@@ -236,7 +281,7 @@ static apr_byte_t openid_provider_static_config(request_rec *r, ox_cfg *c,
 
 	if (ox_metadata_provider_parse(r, j_provider, *provider) == FALSE) {
 		ox_error(r, "could not parse metadata from url: %s",
-				c->provider.metadata_url);
+				c->provider.openid_provider);
 		if (j_provider)
 			json_decref(j_provider);
 		return FALSE;
@@ -257,25 +302,25 @@ static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
 	const char *s_json = NULL;
 
 	/* see if we should configure a static provider based on external (cached) metadata */
-	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
-		*provider = &c->provider;
-		return TRUE;
-	}
+// 	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
+// 		*provider = &c->provider;
+// 		return TRUE;
+// 	}
 
-	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.metadata_url,
+	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.openid_provider,
 			&s_json);
 
 	if (s_json == NULL) {
 
 		if (uma_metadata_provider_retrieve(r, c, NULL,
-				c->provider.metadata_url, &j_provider, &s_json) == FALSE) {
+				c->provider.openid_provider, &j_provider, &s_json) == FALSE) {
 			ox_error(r, "could not retrieve metadata from url: %s",
-					c->provider.metadata_url);
+					c->provider.openid_provider);
 			return FALSE;
 		}
 
 		// TODO: make the expiry configurable
-		c->cache->set(r, OX_CACHE_SECTION_PROVIDER, c->provider.metadata_url,
+		c->cache->set(r, OX_CACHE_SECTION_PROVIDER, c->provider.openid_provider,
 				s_json,
 				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
 
@@ -290,7 +335,7 @@ static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
 
 	if (ox_metadata_provider_parse(r, j_provider, *provider) == FALSE) {
 		ox_error(r, "could not parse metadata from url: %s",
-				c->provider.metadata_url);
+				c->provider.openid_provider);
 		if (j_provider)
 			json_decref(j_provider);
 		return FALSE;
@@ -1481,12 +1526,12 @@ static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 	 * but Google does not allow me to do that:
 	 * Error: invalid_request: Parameter not allowed for this message type: nonce
 	 */
-	if ((apr_strnatcmp(provider->issuer, "accounts.google.com") == 0)
-			&& ((ox_util_spaced_string_equals(r->pool,
-					provider->response_type, "code"))
-					|| (ox_util_spaced_string_equals(r->pool,
-							provider->response_type, "code token"))))
-		json_object_del(proto_state, "nonce");
+// 	if ((apr_strnatcmp(provider->issuer, "accounts.google.com") == 0)
+// 			&& ((ox_util_spaced_string_equals(r->pool,
+// 					provider->response_type, "code"))
+// 					|| (ox_util_spaced_string_equals(r->pool,
+// 							provider->response_type, "code token"))))
+// 		json_object_del(proto_state, "nonce");
 
 	/*
 	 * printout errors if Cookie settings are not going to work
@@ -1497,19 +1542,12 @@ static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 	memset(&r_uri, 0, sizeof(apr_uri_t));
 	apr_uri_parse(r->pool, original_url, &o_uri);
 	apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
-	// 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
-	// 			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
-	// 		ox_error(r,
-	// 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
-	// 				r_uri.scheme, o_uri.scheme);
-	// 		return HTTP_INTERNAL_SERVER_ERROR;
-	// 	}
 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
-		&& (apr_strnatcmp(r_uri.scheme, "http") == 0)) {
-			ox_error(r,
+			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
+		ox_error(r,
 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
 				r_uri.scheme, o_uri.scheme);
-			return HTTP_INTERNAL_SERVER_ERROR;
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	if (c->cookie_domain == NULL) {
@@ -1619,19 +1657,12 @@ static int uma_authenticate_user(request_rec *r, ox_cfg *c,
 	memset(&r_uri, 0, sizeof(apr_uri_t));
 	apr_uri_parse(r->pool, original_url, &o_uri);
 	apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
-// 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
-// 			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
-// 		ox_error(r,
-// 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
-// 				r_uri.scheme, o_uri.scheme);
-// 		return HTTP_INTERNAL_SERVER_ERROR;
-// 	}
 	if ((apr_strnatcmp(o_uri.scheme, r_uri.scheme) != 0)
-		&& (apr_strnatcmp(r_uri.scheme, "http") == 0)) {
-			ox_error(r,
+			&& (apr_strnatcmp(r_uri.scheme, "https") == 0)) {
+		ox_error(r,
 				"the URL scheme (%s) of the configured OXRedirectURI does not match the URL scheme of the URL being accessed (%s): the \"state\" and \"session\" cookies will not be shared between the two!",
 				r_uri.scheme, o_uri.scheme);
-			return HTTP_INTERNAL_SERVER_ERROR;
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	if (c->cookie_domain == NULL) {

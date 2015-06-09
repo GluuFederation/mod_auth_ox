@@ -71,7 +71,7 @@
 #endif
 
 /* validate SSL server certificates by default */
-#define OX_DEFAULT_SSL_VALIDATE_SERVER 1
+#define OX_DEFAULT_SSL_VALIDATE_SERVER 0
 /* default scope requested from the OP */
 #define OX_DEFAULT_SCOPE "openid"
 /* default claim delimiter for multi-valued claims passed in a HTTP header */
@@ -89,7 +89,7 @@
 /* scrub HTTP headers by default unless overridden (and insecure) */
 #define OX_DEFAULT_SCRUB_REQUEST_HEADERS 1
 /* default client_name the client uses for dynamic client registration */
-#define OX_DEFAULT_CLIENT_NAME "OpenID Connect Apache Module (mod_auth_ox)"
+#define OX_DEFAULT_CLIENT_NAME "OpenIDConnectApacheModule"
 /* timeouts in seconds for HTTP calls that may take a long time */
 #define OX_DEFAULT_HTTP_TIMEOUT_LONG  60
 /* timeouts in seconds for HTTP calls that should take a short time (registry/discovery related) */
@@ -759,8 +759,8 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 
 	// gluu support
 	c->provider.openid_provider = NULL;
-	c->provider.oxd_hostaddr = NULL;
-	c->provider.oxd_portnum = 0;
+	c->provider.oxd_hostaddr = "127.0.0.1";
+	c->provider.oxd_portnum = 8099;
 	c->provider.logout_url = NULL;
 	c->provider.client_credit_path = NULL;
 	c->provider.requested_acr = NULL;
@@ -801,7 +801,7 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 
 	c->cache_file_dir = NULL;
 	c->cache_file_clean_interval = OX_DEFAULT_CACHE_FILE_CLEAN_INTERVAL;
-	c->cache_memcache_servers = NULL;
+	c->cache_memcache_servers = "localhost";
 	c->cache_shm_size_max = OX_DEFAULT_CACHE_SHM_SIZE;
 	c->cache_shm_entry_size_max = OX_DEFAULT_CACHE_SHM_ENTRY_SIZE_MAX;
 #ifdef USE_LIBHIREDIS
@@ -1245,56 +1245,64 @@ static int ox_check_config_openid_ox(server_rec *s, ox_cfg *c) {
 
 	apr_uri_t r_uri;
 
-	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)
-			&& (c->provider.metadata_url == NULL)) {
-		ox_serror(s,
-				"one of 'OXProviderIssuer', 'OXProviderMetadataURL' or 'OXMetadataDir' must be set");
+	if (c->provider.openid_provider == NULL) {
+		ox_serror(s, "'OXOpenIDProvider' must be set");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
+	
+// 	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)
+// 			&& (c->provider.metadata_url == NULL)) {
+// 		ox_serror(s,
+// 				"one of 'OXProviderIssuer', 'OXProviderMetadataURL' or 'OXMetadataDir' must be set");
+// 		return HTTP_INTERNAL_SERVER_ERROR;
+// 	}
 
 	if (c->redirect_uri == NULL)
 		return ox_check_config_error(s, "OXRedirectURI");
 	if (c->crypto_passphrase == NULL)
 		return ox_check_config_error(s, "OXCryptoPassphrase");
 
-	if (c->metadata_dir == NULL) {
-		if (c->provider.metadata_url == NULL) {
-			if (c->provider.issuer == NULL)
-				return ox_check_config_error(s, "OXProviderIssuer");
-			if (c->provider.authorization_endpoint_url == NULL)
-				return ox_check_config_error(s,
-						"OXProviderAuthorizationEndpoint");
-			// TODO: this depends on the configured OXResponseType now
-			//			if (c->provider.token_endpoint_url == NULL)
-			//				return ox_check_config_error(s, "OXProviderTokenEndpoint");
-		} else {
-			apr_uri_parse(s->process->pconf, c->provider.metadata_url, &r_uri);
-			if (apr_strnatcmp(r_uri.scheme, "http") == 0) {
-				ox_swarn(s,
-						"the URL scheme (%s) of the configured OXProviderMetadataURL SHOULD be \"https\" for security reasons!",
-						r_uri.scheme);
-			}
-		}
-// 		if (c->provider.client_id == NULL)
-// 			return ox_check_config_error(s, "OXClientID");
-// 		// TODO: this depends on the configured OXResponseType now
-// 		if (c->provider.client_secret == NULL)
-// 			return ox_check_config_error(s, "OXClientSecret");
-	} else {
-		if (c->provider.metadata_url != NULL) {
-			ox_serror(s,
-					"only one of 'OXProviderMetadataURL' or 'OXMetadataDir' should be set");
-			return HTTP_INTERNAL_SERVER_ERROR;
-		}
-	}
+// 	if (c->metadata_dir == NULL) {
+// 		if (c->provider.metadata_url == NULL) {
+// 			if (c->provider.issuer == NULL)
+// 				return ox_check_config_error(s, "OXProviderIssuer");
+// 			if (c->provider.authorization_endpoint_url == NULL)
+// 				return ox_check_config_error(s,
+// 						"OXProviderAuthorizationEndpoint");
+// 			// TODO: this depends on the configured OXResponseType now
+// 			//			if (c->provider.token_endpoint_url == NULL)
+// 			//				return ox_check_config_error(s, "OXProviderTokenEndpoint");
+// 		} else {
+// 			apr_uri_parse(s->process->pconf, c->provider.metadata_url, &r_uri);
+// 			if (apr_strnatcmp(r_uri.scheme, "http") == 0) {
+// 				ox_swarn(s,
+// 						"the URL scheme (%s) of the configured OXProviderMetadataURL SHOULD be \"https\" for security reasons!",
+// 						r_uri.scheme);
+// 			}
+// 		}
+// // 		if (c->provider.client_id == NULL)
+// // 			return ox_check_config_error(s, "OXClientID");
+// // 		// TODO: this depends on the configured OXResponseType now
+// // 		if (c->provider.client_secret == NULL)
+// // 			return ox_check_config_error(s, "OXClientSecret");
+// 	} else {
+// 		if (c->provider.metadata_url != NULL) {
+// 			ox_serror(s,
+// 					"only one of 'OXProviderMetadataURL' or 'OXMetadataDir' should be set");
+// 			return HTTP_INTERNAL_SERVER_ERROR;
+// 		}
+// 	}
 
-	apr_uri_parse(s->process->pconf, c->redirect_uri, &r_uri);
-	if (apr_strnatcmp(r_uri.scheme, "https") != 0) {
-		ox_swarn(s,
+	if (c->redirect_uri != NULL)
+	{
+		apr_uri_parse(s->process->pconf, c->redirect_uri, &r_uri);
+		if (apr_strnatcmp(r_uri.scheme, "https") != 0) {
+			ox_swarn(s,
 				"the URL scheme (%s) of the configured OXRedirectURI SHOULD be \"https\" for security reasons (moreover: some Providers may reject non-HTTPS URLs)",
 				r_uri.scheme);
+		}
 	}
-
+	
 	if (c->cookie_domain != NULL) {
 		char *p = strstr(r_uri.hostname, c->cookie_domain);
 		if ((p == NULL) || (apr_strnatcmp(c->cookie_domain, p) != 0)) {

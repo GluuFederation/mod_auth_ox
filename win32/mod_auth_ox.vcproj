@@ -538,10 +538,6 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath="..\src\uma.c"
-				>
-			</File>
-			<File
 				RelativePath="..\src\util.c"
 				>
 				<FileConfiguration
@@ -774,14 +770,6 @@
 				</File>
 				<File
 					RelativePath="..\src\oxd\oxd_client.h"
-					>
-				</File>
-				<File
-					RelativePath="..\src\oxd\oxd_main.c"
-					>
-				</File>
-				<File
-					RelativePath="..\src\oxd\oxd_main.h"
 					>
 				</File>
 			</Filter>
