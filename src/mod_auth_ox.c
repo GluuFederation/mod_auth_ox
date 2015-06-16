@@ -330,6 +330,93 @@ static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
 		j_provider = json_loads(s_json, 0, 0);
 	}
 
+	{
+		char client_id_key[128];
+		char client_secret_key[128];
+		apr_byte_t ret;
+		json_t *j_clientinfo;
+		char resp_str[8192];
+
+		sprintf(client_id_key, "%s_id", c->provider.openid_provider);
+		sprintf(client_secret_key, "%s_secret", c->provider.openid_provider);
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, client_id_key, (const char **)&c->provider.client_id);
+		if (ret == FALSE) c->provider.client_id = NULL;
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, (const char **)&c->provider.client_secret);
+		if (ret == FALSE) c->provider.client_secret = NULL;
+
+		if ((c->provider.client_id == NULL) || (c->provider.client_secret == NULL))
+		{
+			int expires_at, issued_at;
+			
+			oxd_register_client(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
+				c->provider.openid_provider, c->redirect_uri, c->provider.logout_url, c->provider.client_name, resp_str);
+			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+				return FALSE;
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_id", &c->provider.client_id, NULL);
+			ox_json_object_get_string(r->pool, j_clientinfo, "client_secret", &c->provider.client_secret, NULL);
+			ox_json_object_get_int(r->pool, j_clientinfo, "client_secret_expires_at", &expires_at, 0);
+			ox_json_object_get_int(r->pool, j_clientinfo, "client_id_issued_at", &issued_at, 0);
+
+			/* save client_id and client_secret into memcache */
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_id_key, c->provider.client_id, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, c->provider.client_secret, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			if (c->provider.client_credit_path != NULL)
+				json_dump_file(j_clientinfo, c->provider.client_credit_path, JSON_ENCODE_ANY);
+			json_decref(j_clientinfo);
+		}
+		else
+		{
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_id_key, c->provider.client_id, 
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key,	c->provider.client_secret,	
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+		}
+
+		// obtain pat
+		char *user_id = "";//"admin";
+		char *user_secret = "";//"rootroot";
+		oxd_obtain_pat(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
+			c->provider.openid_provider, c->provider.uma_auth_server, c->redirect_uri, 
+			c->provider.client_id, c->provider.client_secret, user_id, user_secret, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (c->provider.pat_token == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "pat_token", &c->provider.pat_token, NULL);
+		json_decref(j_clientinfo);
+
+		// register resource
+		oxd_register_resource(c->provider.oxd_hostaddr, c->provider.oxd_portnum, c->provider.uma_auth_server, 
+			c->provider.pat_token, c->provider.uma_resource_name, c->provider.uma_scope, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (c->provider.uma_resource_id == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "_id", &c->provider.uma_resource_id, NULL);
+		json_decref(j_clientinfo);
+
+		// obtain aat
+		oxd_obtain_aat(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+			c->provider.openid_provider, c->provider.uma_auth_server, c->redirect_uri, 
+			c->provider.client_id, c->provider.client_secret, user_id, user_secret, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (c->provider.aat_token == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "aat_token", &c->provider.aat_token, NULL);
+		json_decref(j_clientinfo);
+
+		// obtain rpt
+		if (c->provider.uma_amhost == NULL)
+			c->provider.uma_amhost = c->provider.uma_auth_server;
+		oxd_obtain_rpt(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+			c->provider.aat_token, c->provider.uma_amhost, resp_str);
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+			return FALSE;
+		if (c->provider.rpt_token == NULL)
+			ox_json_object_get_string(r->pool, j_clientinfo, "rpt_token", &c->provider.rpt_token, NULL);
+		json_decref(j_clientinfo);
+	}
+
 	*provider = (ox_provider_t *)apr_pcalloc(r->pool, sizeof(ox_provider_t));
 	memcpy(*provider, &c->provider, sizeof(ox_provider_t));
 
@@ -1219,7 +1306,7 @@ static const char *ox_resolve_claims_from_user_info_endpoint(request_rec *r,
  * complete the handling of an authorization response by obtaining, parsing and verifying the
  * id_token and storing the authenticated user state in the session
  */
-static int ox_handle_authorization_response(request_rec *r, ox_cfg *c,
+static int ox_handle_openid_authorization_response(request_rec *r, ox_cfg *c,
 		session_rec *session, apr_table_t *params, const char *response_mode) {
 
 	ox_debug(r, "enter, response_mode=%s", response_mode);
@@ -1328,6 +1415,175 @@ static int ox_handle_authorization_response(request_rec *r, ox_cfg *c,
 }
 
 /*
+ * complete the handling of an authorization response by obtaining, parsing and verifying the
+ * id_token and storing the authenticated user state in the session
+ */
+static int ox_handle_uma_authorization_response(request_rec *r, ox_cfg *c,
+		session_rec *session, apr_table_t *params, const char *response_mode) {
+
+	ox_debug(r, "enter, response_mode=%s", response_mode);
+
+	ox_provider_t *provider = NULL;
+	json_t *proto_state = NULL;
+	apr_jwt_t *jwt = NULL;
+
+	/* match the returned state parameter against the state stored in the browser */
+	if (ox_authorization_response_match_state(r, c,
+			apr_table_get(params, "state"), &provider, &proto_state) == FALSE) {
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* see if the response is an error response */
+	if (apr_table_get(params, "error") != NULL)
+		return ox_authorization_response_error(r, c, proto_state,
+				apr_table_get(params, "error"),
+				apr_table_get(params, "error_description"));
+
+	/* handle the code, implicit or hybrid flow */
+	if (ox_handle_flows(r, c, proto_state, provider, params, response_mode,
+			&jwt) == FALSE)
+		return ox_authorization_response_error(r, c, proto_state,
+				"Error in handling response type.", NULL);
+
+	if (jwt == NULL) {
+		ox_error(r, "no id_token was provided");
+		return ox_authorization_response_error(r, c, proto_state,
+				"No id_token was provided.", NULL);
+	}
+
+	int expires_in = ox_parse_expires_in(r,
+			apr_table_get(params, "expires_in"));
+
+	/*
+	 * optionally resolve additional claims against the userinfo endpoint
+	 * parsed claims are not actually used here but need to be parsed anyway for error checking purposes
+	 */
+	const char *claims = ox_resolve_claims_from_user_info_endpoint(r, c,
+			provider, params);
+
+	/* obtain rpt */
+	{
+		char resp_str[8192];
+		json_t *j_obtainrpt;
+		if (oxd_obtain_rpt(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
+			c->provider.aat_token, c->provider.uma_amhost, resp_str) == FALSE) {
+				return ox_authorization_response_error(r, c, proto_state,
+					"No obtain rpt token.", NULL);
+		}
+		
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_obtainrpt) == FALSE)
+			return FALSE;
+		ox_json_object_get_string(r->pool, j_obtainrpt, "rpt_token", &c->provider.rpt_token, NULL);
+
+		json_decref(j_obtainrpt);
+	}
+
+	/* register ticket */
+	{
+		char resp_str[8192];
+		json_t *j_registerticket;
+		if (oxd_register_ticket(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+			c->provider.uma_auth_server, c->provider.pat_token, c->provider.uma_amhost, 
+			c->provider.uma_rshost, c->provider.uma_scope, c->provider.uma_resource_id, 
+			resp_str) == FALSE) {
+				return ox_authorization_response_error(r, c, proto_state,
+					"No register ticket.", NULL);
+		}
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_registerticket) == FALSE)
+			return FALSE;
+		ox_json_object_get_string(r->pool, j_registerticket, "ticket", &c->provider.resource_ticket, NULL);
+
+		json_decref(j_registerticket);
+	}
+
+	/* authorize rpt */
+	{
+		char resp_str[8192];
+		if (oxd_authorize_rpt_token(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+			c->provider.aat_token, c->provider.rpt_token, c->provider.uma_amhost, 
+			c->provider.resource_ticket, "", resp_str) == FALSE) {
+				return ox_authorization_response_error(r, c, proto_state,
+					"No authorize rpt token.", NULL);
+		}
+	}
+
+	/* check rpt status */
+	{
+		char resp_str[8192];
+		if (oxd_check_rpt_status(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+			c->provider.uma_auth_server, c->provider.pat_token, c->provider.rpt_token, 
+			resp_str) == FALSE) {
+				return ox_authorization_response_error(r, c, proto_state,
+					"No check rpt status.", NULL);
+		}
+	}
+
+	/* set the user */
+	if (ox_get_remote_user(r, c, provider, jwt, &r->user) == TRUE) {
+
+		/* session management: if the user in the new response is not equal to the old one, error out */
+		if ((json_object_get(proto_state, "prompt") != NULL)
+				&& (apr_strnatcmp(
+						json_string_value(
+								json_object_get(proto_state, "prompt")), "none")
+						== 0)) {
+			// TOOD: actually need to compare sub? (need to store it in the session separately then
+			//const char *sub = NULL;
+			//ox_session_get(r, session, "sub", &sub);
+			//if (apr_strnatcmp(sub, jwt->payload.sub) != 0) {
+			if (apr_strnatcmp(session->remote_user, r->user) != 0) {
+				ox_warn(r,
+						"user set from new id_token is different from current one");
+				apr_jwt_destroy(jwt);
+				return ox_authorization_response_error(r, c, proto_state,
+						"User changed!", NULL);
+			}
+		}
+
+		/* store resolved information in the session */
+		ox_save_in_session(r, c, session, provider, r->user,
+				apr_table_get(params, "id_token"), jwt, claims,
+				apr_table_get(params, "access_token"), expires_in,
+				apr_table_get(params, "refresh_token"),
+				apr_table_get(params, "session_state"));
+	} else {
+		ox_error(r, "remote user could not be set");
+		return ox_authorization_response_error(r, c, proto_state,
+				"Remote user could not be set: contact the website administrator",
+				NULL);
+	}
+
+	/* restore the original protected URL that the user was trying to access */
+	const char *original_url = apr_pstrdup(r->pool,
+			json_string_value(json_object_get(proto_state, "original_url")));
+	const char *original_method = apr_pstrdup(r->pool,
+			json_string_value(json_object_get(proto_state, "original_method")));
+
+	/* cleanup */
+	json_decref(proto_state);
+	apr_jwt_destroy(jwt);
+
+	/* check that we've actually authenticated a user; functions as error handling for ox_get_remote_user */
+	if (r->user == NULL)
+		return HTTP_UNAUTHORIZED;
+
+	/* check whether form post data was preserved; if so restore it */
+	if (apr_strnatcmp(original_method, "form_post") == 0) {
+		return ox_restore_preserved_post(r, original_url);
+	}
+
+	/* log the successful response */
+	ox_debug(r, "session created and stored, redirecting to original URL: %s",
+			original_url);
+
+	/* now we've authenticated the user so go back to the URL that he originally tried to access */
+	apr_table_add(r->headers_out, "Location", original_url);
+
+	/* do the actual redirect to the original URL */
+	return HTTP_MOVED_TEMPORARILY;
+}
+
+/*
  * handle an OpenID Connect Authorization Response using the POST (+fragment->POST) response_mode
  */
 static int ox_handle_post_authorization_response(request_rec *r, ox_cfg *c,
@@ -1359,7 +1615,7 @@ static int ox_handle_post_authorization_response(request_rec *r, ox_cfg *c,
 	response_mode = (char *) apr_table_get(params, "response_mode");
 
 	/* do the actual implicit work */
-	return ox_handle_authorization_response(r, c, session, params,
+	return ox_handle_openid_authorization_response(r, c, session, params,
 			response_mode ? response_mode : "form_post");
 }
 
@@ -1376,7 +1632,23 @@ static int ox_handle_redirect_authorization_response(request_rec *r,
 	ox_util_read_form_encoded_params(r, params, r->args);
 
 	/* do the actual work */
-	return ox_handle_authorization_response(r, c, session, params, "query");
+	return ox_handle_openid_authorization_response(r, c, session, params, "query");
+}
+
+/*
+ * handle an UMA Authorization Response using the redirect response_mode
+ */
+static int uma_handle_redirect_authorization_response(request_rec *r,
+		ox_cfg *c, session_rec *session) {
+
+	ox_debug(r, "enter");
+
+	/* read the parameters from the query string */
+	apr_table_t *params = apr_table_make(r->pool, 8);
+	ox_util_read_form_encoded_params(r, params, r->args);
+
+	/* do the actual work */
+	return ox_handle_uma_authorization_response(r, c, session, params, "query");
 }
 
 /*
@@ -1619,14 +1891,11 @@ static int uma_authenticate_user(request_rec *r, ox_cfg *c,
 	json_object_set_new(proto_state, "original_url", json_string(original_url));
 	json_object_set_new(proto_state, "original_method", json_string(method));
 	json_object_set_new(proto_state, "issuer", json_string(provider->issuer));
-	json_object_set_new(proto_state, "response_type",
-			json_string(provider->response_type));
+	json_object_set_new(proto_state, "response_type", json_string(provider->uma_response_type));
 	json_object_set_new(proto_state, "nonce", json_string(nonce));
-	json_object_set_new(proto_state, "timestamp",
-			json_integer(apr_time_sec(apr_time_now())));
+	json_object_set_new(proto_state, "timestamp", json_integer(apr_time_sec(apr_time_now())));
 	if (provider->response_mode)
-		json_object_set_new(proto_state, "response_mode",
-				json_string(provider->response_mode));
+		json_object_set_new(proto_state, "response_mode", json_string(provider->response_mode));
 	if (prompt)
 		json_object_set_new(proto_state, "prompt", json_string(prompt));
 
@@ -2335,6 +2604,124 @@ int ox_handle_redirect_uri_request(request_rec *r, ox_cfg *c,
 }
 
 /*
+ * handle all requests to the uma redirect_uri
+ */
+int uma_handle_redirect_uri_request(request_rec *r, ox_cfg *c,
+		session_rec *session) {
+
+	if (ox_proto_is_redirect_authorization_response(r, c)) {
+
+		/* this is an authorization response from the OP using the Basic Client profile or a Hybrid flow*/
+		return uma_handle_redirect_authorization_response(r, c, session);
+
+	} else if (ox_proto_is_post_authorization_response(r, c)) {
+
+		/* this is an authorization response using the fragment(+POST) response_mode with the Implicit Client profile */
+		return ox_handle_post_authorization_response(r, c, session);
+
+	} else if (ox_is_discovery_response(r, c)) {
+
+		/* this is response from the OP discovery page */
+		return ox_handle_discovery_response(r, c);
+
+	} else if (ox_util_request_has_parameter(r, "logout")) {
+
+		/* handle logout */
+		return ox_handle_logout(r, c, session);
+
+	} else if (ox_util_request_has_parameter(r, "jwks")) {
+
+		/* handle JWKs request */
+		return ox_handle_jwks(r, c);
+
+	} else if (ox_util_request_has_parameter(r, "session")) {
+
+		/* handle session management request */
+		return ox_handle_session_management(r, c, session);
+
+	} else if (ox_util_request_has_parameter(r, "refresh")) {
+
+		/* handle refresh token request */
+		return ox_handle_refresh_token_request(r, c, session);
+
+	} else if ((r->args == NULL) || (apr_strnatcmp(r->args, "") == 0)) {
+
+		/* this is a "bare" request to the redirect URI, indicating implicit flow using the fragment response_mode */
+		return ox_proto_javascript_implicit(r, c);
+	}
+
+	/* this is not an authorization response or logout request */
+
+	/* check for "error" response */
+	if (ox_util_request_has_parameter(r, "error")) {
+
+//		char *error = NULL, *descr = NULL;
+//		ox_util_get_request_parameter(r, "error", &error);
+//		ox_util_get_request_parameter(r, "error_description", &descr);
+//
+//		/* send user facing error to browser */
+//		return ox_util_html_send_error(r, error, descr, DONE);
+		ox_handle_redirect_authorization_response(r, c, session);
+	}
+
+	/* something went wrong */
+	return ox_util_html_send_error(r, "mod_auth_ox",
+			apr_psprintf(r->pool,
+					"The OpenID Connect callback URL received an invalid request: %s",
+					r->args), HTTP_INTERNAL_SERVER_ERROR);
+}
+
+static int show_html_redirect_page(request_rec *r) {
+	const char *java_script = 
+		"    <SCRIPT language=javascript>\n"
+		"      <!--\n"
+		"        getParameter = function(name){\n"
+		"          search=location.search;\n"
+		"          if(!search){\n"
+		"            return false;\n"
+		"          }\n"
+		"          search=search.split(\"?\");\n"
+		"          data=search[1].split(\"=\");\n"
+		"          if(search[1].indexOf(name)==(-1) || data[0]!=name){\n"
+		//no needed parameter.
+		"            return false;\n"
+		"          }\n"
+		"          if(search[1].indexOf(\"&\")==(-1)){\n"
+		//one needed paramter
+		"            data=search[1].split(\"=\");\n"
+		"            return data[1];\n"
+		"          }else{\n"
+		//some needed parameters
+		"            data=search[1].split(\"&\");\n"
+		"            for(i=0;i<=data.length-1;i++){\n"
+		"              l_data=data[i].split(\"=\");\n"
+		"              if(l_data[0]==name){\n"
+		"                return l_data[1];\n"
+		"                break;\n"
+		"              }else continue;\n"
+		"            }\n"
+		"          }\n"
+		"        }\n"
+		"        var errparam=getParameter(\"error\");\n"
+		"        var errdescription=getParameter(\"error_description\");\n"
+		"        if (errparam==false) {\n"
+		"          var uri = window.location.href;\n"
+		"          var redirect_uri = uri.replace(\"#\", \"?\");\n"
+		"          window.location.href = redirect_uri;\n"
+		"        }\n"
+		"        else {\n"
+		"          document.write(errparam);\n"
+		"          document.write(\"<br>\");\n"
+		"          document.write(errdescription);\n"
+		"        }\n"
+		"      -->\n"
+		"    </SCRIPT>\n";
+
+	// return HTTP_UNAUTHORIZED so that no further modules can produce output
+	return ox_util_html_send(r, NULL, java_script, NULL, NULL, DONE);
+}
+
+/*
  * main routine: handle OpenID Connect authentication
  */
 static int ox_check_userid_openid(request_rec *r, ox_cfg *c) {
@@ -2348,6 +2735,9 @@ static int ox_check_userid_openid(request_rec *r, ox_cfg *c) {
 
 		/* see if the initial request is to the redirect URI; this handles potential logout too */
 		if (ox_util_request_matches_url(r, c->redirect_uri)) {
+
+			if (r->args == NULL)
+				return show_html_redirect_page(r);
 
 			/* handle request to the redirect_uri */
 			return ox_handle_redirect_uri_request(r, c, session);
@@ -2414,8 +2804,11 @@ static int ox_check_userid_uma(request_rec *r, ox_cfg *c) {
 		/* see if the initial request is to the redirect URI; this handles potential logout too */
 		if (ox_util_request_matches_url(r, c->redirect_uri)) {
 
+			if (r->args == NULL)
+				return show_html_redirect_page(r);
+
 			/* handle request to the redirect_uri */
-			return ox_handle_redirect_uri_request(r, c, session);
+			return uma_handle_redirect_uri_request(r, c, session);
 
 			/* initial request to non-redirect URI, check if we have an existing session */
 		} else if (session->remote_user != NULL) {
@@ -2496,6 +2889,72 @@ static int ox_check_userid_uma(request_rec *r, ox_cfg *c) {
 // }
 
 /*
+ * check config of mod_auth_ox module in auth_ox.conf file
+ */
+int ox_check_user_config(request_rec *r, ox_cfg *c) 
+{
+	apr_uri_t r_uri;
+
+	// check 'OXOpenIDProvider' directive
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect")	== 0) {
+		if (c->provider.openid_provider == NULL) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"'OXOpenIDProvider' must be set in auth_ox.conf! And, please restart Apache service.",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+	}
+
+	// check 'UMAAuthorizationServer' directive
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "uma") == 0) {
+		if (c->provider.uma_auth_server == NULL) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"'UMAAuthorizationServer' must be set in auth_ox.conf! And, please restart Apache service.",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+
+		if (c->provider.uma_resource_name == NULL) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"'UMAResourceName' must be set in auth_ox.conf! And, please restart Apache service.",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+	}
+
+	// check 'OXRedirectURI' directive
+	if (c->redirect_uri == NULL) {
+		return ox_util_html_send_error(r, "mod_auth_ox",
+			"'OXRedirectURI' must be set in auth_ox.conf! And, please restart Apache service.",
+			HTTP_INTERNAL_SERVER_ERROR);
+	}
+	else
+	{
+		apr_uri_parse(r->pool, c->redirect_uri, &r_uri);
+		if (apr_strnatcmp(r_uri.scheme, "https") != 0) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"the URL scheme of the configured OXRedirectURI SHOULD be \"https\" for security reasons (moreover: some Providers may reject non-HTTPS URLs)",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+
+		if (c->cookie_domain != NULL) {
+			char *p = strstr(r_uri.hostname, c->cookie_domain);
+			if ((p == NULL) || (apr_strnatcmp(c->cookie_domain, p) != 0)) {
+				return ox_util_html_send_error(r, "mod_auth_ox",
+					"the domain configured in OXCookieDomain does not match the URL hostname of the configured OXRedirectURI : setting \"state\" and \"session\" cookies will not work!",
+					HTTP_INTERNAL_SERVER_ERROR);
+			}
+		}
+	}
+
+	// check 'OXCryptoPassphrase' directive
+	if (c->crypto_passphrase == NULL) {
+		return ox_util_html_send_error(r, "mod_auth_ox",
+			"'OXCryptoPassphrase' must be set in auth_ox.conf! And, please restart Apache service.",
+			HTTP_INTERNAL_SERVER_ERROR);
+	}
+
+	return OK;
+}
+
+/*
  * generic Apache authentication hook for this module: dispatches to OpenID Connect or OAuth 2.0 specific routines
  */
 int ox_check_user_id(request_rec *r) {
@@ -2511,15 +2970,21 @@ int ox_check_user_id(request_rec *r) {
 	if (ap_auth_type(r) == NULL)
 		return DECLINED;
 
+	/* check user config in auth_ox.conf file */
+	int ret;
+	if (ret = ox_check_user_config(r, c) != OK) {
+		return ret;
+	}
+
 	/* see if we've configured OpenID Connect user authentication for this request */
-	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect")
-			== 0)
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect")	== 0) {
 		return ox_check_userid_openid(r, c);
+	}
 
 	/* see if we've configured UMA user authentication for this request */
-	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "uma")
-		== 0)
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "uma") == 0) {
 		return ox_check_userid_uma(r, c);
+	}
 
 	/* see if we've configured OAuth 2.0 access control for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0)

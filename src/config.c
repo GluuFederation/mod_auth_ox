@@ -104,6 +104,8 @@
 #define OX_DEFAULT_SESSION_MAX_DURATION 3600 * 8
 /* default OpenID Connect authorization response type */
 #define OX_DEFAULT_RESPONSE_TYPE "code"
+/* default UMA authorization response type */
+#define UMA_DEFAULT_RESPONSE_TYPE "token id_token"
 /* default duration in seconds after which retrieved JWS should be refreshed */
 #define OX_DEFAULT_JWKS_REFRESH_INTERVAL 3600
 /* default max cache size for shm */
@@ -771,6 +773,7 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.rpt_token = NULL;
 	c->provider.uma_resource_name = NULL;
 	c->provider.uma_resource_id = NULL;
+	c->provider.uma_response_type = UMA_DEFAULT_RESPONSE_TYPE;
 	c->provider.uma_scope = NULL;
 	c->provider.uma_rshost = NULL;
 	c->provider.uma_amhost = NULL;
@@ -1018,6 +1021,10 @@ void *ox_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->provider.uma_resource_name != NULL ?
 					add->provider.uma_resource_name :
 					base->provider.uma_resource_name;
+	c->provider.uma_response_type =
+			apr_strnatcmp(add->provider.uma_response_type,
+					UMA_DEFAULT_RESPONSE_TYPE) != 0 ?
+					add->provider.uma_response_type : base->provider.uma_response_type;
 	c->provider.uma_scope =
 			add->provider.uma_scope != NULL ?
 					add->provider.uma_scope :
@@ -1243,12 +1250,12 @@ static int ox_check_config_error(server_rec *s, const char *config_str) {
  */
 static int ox_check_config_openid_ox(server_rec *s, ox_cfg *c) {
 
-	apr_uri_t r_uri;
+//	apr_uri_t r_uri;
 
-	if (c->provider.openid_provider == NULL) {
-		ox_serror(s, "'OXOpenIDProvider' must be set");
-		return HTTP_INTERNAL_SERVER_ERROR;
-	}
+// 	if ((c->provider.openid_provider == NULL) && (c->provider.uma_auth_server == NULL)) {
+// 		ox_serror(s, "'OXOpenIDProvider or UMAAuthorizationServer' must be set");
+// 		return HTTP_INTERNAL_SERVER_ERROR;
+// 	}
 	
 // 	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)
 // 			&& (c->provider.metadata_url == NULL)) {
@@ -1257,10 +1264,10 @@ static int ox_check_config_openid_ox(server_rec *s, ox_cfg *c) {
 // 		return HTTP_INTERNAL_SERVER_ERROR;
 // 	}
 
-	if (c->redirect_uri == NULL)
-		return ox_check_config_error(s, "OXRedirectURI");
-	if (c->crypto_passphrase == NULL)
-		return ox_check_config_error(s, "OXCryptoPassphrase");
+// 	if (c->redirect_uri == NULL)
+// 		return ox_check_config_error(s, "OXRedirectURI");
+// 	if (c->crypto_passphrase == NULL)
+// 		return ox_check_config_error(s, "OXCryptoPassphrase");
 
 // 	if (c->metadata_dir == NULL) {
 // 		if (c->provider.metadata_url == NULL) {
@@ -1293,25 +1300,25 @@ static int ox_check_config_openid_ox(server_rec *s, ox_cfg *c) {
 // 		}
 // 	}
 
-	if (c->redirect_uri != NULL)
-	{
-		apr_uri_parse(s->process->pconf, c->redirect_uri, &r_uri);
-		if (apr_strnatcmp(r_uri.scheme, "https") != 0) {
-			ox_swarn(s,
-				"the URL scheme (%s) of the configured OXRedirectURI SHOULD be \"https\" for security reasons (moreover: some Providers may reject non-HTTPS URLs)",
-				r_uri.scheme);
-		}
-	}
+// 	if (c->redirect_uri != NULL)
+// 	{
+// 		apr_uri_parse(s->process->pconf, c->redirect_uri, &r_uri);
+// 		if (apr_strnatcmp(r_uri.scheme, "https") != 0) {
+// 			ox_swarn(s,
+// 				"the URL scheme (%s) of the configured OXRedirectURI SHOULD be \"https\" for security reasons (moreover: some Providers may reject non-HTTPS URLs)",
+// 				r_uri.scheme);
+// 		}
+// 	}
 	
-	if (c->cookie_domain != NULL) {
-		char *p = strstr(r_uri.hostname, c->cookie_domain);
-		if ((p == NULL) || (apr_strnatcmp(c->cookie_domain, p) != 0)) {
-			ox_serror(s,
-					"the domain (%s) configured in OXCookieDomain does not match the URL hostname (%s) of the configured OXRedirectURI (%s): setting \"state\" and \"session\" cookies will not work!",
-					c->cookie_domain, r_uri.hostname, c->redirect_uri);
-			return HTTP_INTERNAL_SERVER_ERROR;
-		}
-	}
+// 	if (c->cookie_domain != NULL) {
+// 		char *p = strstr(r_uri.hostname, c->cookie_domain);
+// 		if ((p == NULL) || (apr_strnatcmp(c->cookie_domain, p) != 0)) {
+// 			ox_serror(s,
+// 					"the domain (%s) configured in OXCookieDomain does not match the URL hostname (%s) of the configured OXRedirectURI (%s): setting \"state\" and \"session\" cookies will not work!",
+// 					c->cookie_domain, r_uri.hostname, c->redirect_uri);
+// 			return HTTP_INTERNAL_SERVER_ERROR;
+// 		}
+// 	}
 
 	return OK;
 }
@@ -1790,6 +1797,11 @@ command_rec ox_config_cmds[] = {
 			(void*)APR_OFFSETOF(ox_cfg, provider.uma_resource_name),
 			RSRC_CONF,
 			"UMAResourceName"),
+		AP_INIT_TAKE1("UMAResponseType",
+			(cmd_func)ox_set_response_type,
+			(void *)APR_OFFSETOF(ox_cfg, provider.uma_response_type),
+			RSRC_CONF,
+			"The uma response type used; must be one of \"code\", \"id_token\", \"id_token token\", \"code id_token\", \"code token\" or \"code id_token token\" (serves as default value for discovered OPs too)"),
 		AP_INIT_TAKE1("UMAScope", (cmd_func)ox_set_string_slot,
 			(void*)APR_OFFSETOF(ox_cfg, provider.uma_scope),
 			RSRC_CONF,

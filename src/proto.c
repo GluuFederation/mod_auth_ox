@@ -233,11 +233,13 @@ int uma_proto_authorization_request(request_rec *r,
 			provider->authorization_endpoint_url,
 			strchr(provider->authorization_endpoint_url, '?') != NULL ?
 					"&" : "?");
+// 	authorization_request = apr_psprintf(r->pool, "%sresponse_type=%s",
+// 			authorization_request,
+// 			ox_util_escape_string(r,
+// 					json_string_value(
+// 							json_object_get(proto_state, "response_type"))));
 	authorization_request = apr_psprintf(r->pool, "%sresponse_type=%s",
-			authorization_request,
-			ox_util_escape_string(r,
-					json_string_value(
-							json_object_get(proto_state, "response_type"))));
+		authorization_request, "token id_token");
 	authorization_request = apr_psprintf(r->pool, "%s&scope=%s",
 			authorization_request, ox_util_escape_string(r, provider->scope));
 	authorization_request = apr_psprintf(r->pool, "%s&client_id=%s",
@@ -968,13 +970,6 @@ static apr_byte_t ox_proto_token_endpoint_request(request_rec *r,
 
 	json_decref(result);
 
-	/* check id_token status, set the environment variables. */
-	{
-		char resp_str[8192];
-		if (oxd_check_id_token(cfg->provider.oxd_hostaddr, cfg->provider.oxd_portnum, cfg->provider.openid_provider, *id_token, resp_str) == FALSE)
-			return FALSE;
-	}
-
 	return TRUE;
 }
 
@@ -1490,6 +1485,24 @@ static apr_byte_t ox_proto_parse_idtoken_and_validate_code(request_rec *r,
 			nonce ? json_string_value(nonce) : NULL, jwt, is_code_flow) == FALSE)
 		return FALSE;
 
+	/* check id_token status, set the environment variables. */
+	{
+		char resp_str[8192];
+		json_t *j_checktoken;
+		int token_timeout;
+		int expires_at, issued_at;
+
+		if (oxd_check_id_token(c->provider.oxd_hostaddr, c->provider.oxd_portnum, c->provider.openid_provider, id_token, resp_str) == FALSE)
+			return FALSE;
+		if (ox_util_decode_json_and_check_error(r, resp_str, &j_checktoken) == FALSE)
+			return FALSE;
+		ox_json_object_get_int(r->pool, j_checktoken, "expires_at", &expires_at, 0);
+		ox_json_object_get_int(r->pool, j_checktoken, "issued_at", &issued_at, 0);
+		token_timeout = expires_at - issued_at;
+
+		json_decref(j_checktoken);
+	}
+
 	if ((must_validate_code == TRUE)
 			&& (ox_proto_validate_code(r, provider, *jwt, response_type, code)
 					== FALSE))
@@ -1673,9 +1686,9 @@ static apr_byte_t ox_proto_handle_implicit_flow(request_rec *r, ox_cfg *c,
 		ox_provider_t *provider, apr_table_t *params,
 		const char *response_mode, apr_jwt_t **jwt) {
 
-	if (ox_proto_validate_response_type_and_response_mode(r, response_type,
-			params, proto_state, response_mode, "fragment") == FALSE)
-		return FALSE;
+// 	if (ox_proto_validate_response_type_and_response_mode(r, response_type,
+// 			params, proto_state, response_mode, "fragment") == FALSE)
+// 		return FALSE;
 
 	if (ox_proto_parse_idtoken_and_validate_code(r, c, proto_state, provider,
 			response_type, params, jwt, TRUE) == FALSE)

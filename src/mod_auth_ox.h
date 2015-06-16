@@ -238,8 +238,10 @@ typedef struct ox_provider_t {
 	char *pat_token;
 	char *aat_token;
 	char *rpt_token;
+	char *resource_ticket;
 	char *uma_resource_name;
 	char *uma_resource_id;
+	char *uma_response_type;
 	char *uma_scope;
 	char *uma_rshost;
 	char *uma_amhost;
@@ -383,6 +385,8 @@ apr_byte_t ox_proto_handle_authorization_response_code_token(request_rec *r, ox_
 apr_byte_t ox_proto_handle_authorization_response_code(request_rec *r, ox_cfg *c, json_t *proto_state, ox_provider_t *provider, apr_table_t *params, const char *response_mode, apr_jwt_t **jwt);
 apr_byte_t ox_proto_handle_authorization_response_idtoken_token(request_rec *r, ox_cfg *c, json_t *proto_state, ox_provider_t *provider, apr_table_t *params, const char *response_mode, apr_jwt_t **jwt);
 apr_byte_t ox_proto_handle_authorization_response_idtoken(request_rec *r, ox_cfg *c, json_t *proto_state, ox_provider_t *provider, apr_table_t *params, const char *response_mode, apr_jwt_t **jwt);
+
+apr_byte_t ox_proto_handle_uma_response_idtoken_token(request_rec *r, ox_cfg *c, json_t *proto_state, ox_provider_t *provider, apr_table_t *params, const char *response_mode, apr_jwt_t **jwt);
 
 // non-static for test.c
 apr_byte_t ox_proto_validate_access_token(request_rec *r, ox_provider_t *provider, apr_jwt_t *jwt, const char *response_type, const char *access_token);
