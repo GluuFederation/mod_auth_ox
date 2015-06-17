@@ -333,21 +333,41 @@ static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
 	{
 		char client_id_key[128];
 		char client_secret_key[128];
+		char pat_token[128];
+		char uma_resource_id[128];
+		char aat_token[128];
+		char rpt_token[128];
+
 		apr_byte_t ret;
 		json_t *j_clientinfo;
 		char resp_str[8192];
 
 		sprintf(client_id_key, "%s_id", c->provider.openid_provider);
 		sprintf(client_secret_key, "%s_secret", c->provider.openid_provider);
+		sprintf(pat_token, "%s_pattoken", c->provider.openid_provider);
+		sprintf(uma_resource_id, "%s_resourceid", c->provider.openid_provider);
+		sprintf(aat_token, "%s_aattoken", c->provider.openid_provider);
+		sprintf(rpt_token, "%s_rpttoken", c->provider.openid_provider);
+
 		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, client_id_key, (const char **)&c->provider.client_id);
 		if (ret == FALSE) c->provider.client_id = NULL;
 		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, (const char **)&c->provider.client_secret);
 		if (ret == FALSE) c->provider.client_secret = NULL;
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, pat_token, (const char **)&c->provider.pat_token);
+		if (ret == FALSE) c->provider.pat_token = NULL;
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, uma_resource_id, (const char **)&c->provider.uma_resource_id);
+		if (ret == FALSE) c->provider.uma_resource_id = NULL;
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, aat_token, (const char **)&c->provider.aat_token);
+		if (ret == FALSE) c->provider.aat_token = NULL;
+		ret = c->cache->get(r, OX_CACHE_SECTION_PROVIDER, rpt_token, (const char **)&c->provider.rpt_token);
+		if (ret == FALSE) c->provider.rpt_token = NULL;
 
-		if ((c->provider.client_id == NULL) || (c->provider.client_secret == NULL))
+		if ((c->provider.client_id == NULL) || (c->provider.client_secret == NULL) || (c->provider.pat_token == NULL) ||
+			(c->provider.uma_resource_id == NULL) || (c->provider.aat_token == NULL) || (c->provider.rpt_token == NULL))
 		{
 			int expires_at, issued_at;
 			
+			/* register client */
 			oxd_register_client(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
 				c->provider.openid_provider, c->redirect_uri, c->provider.logout_url, c->provider.client_name, resp_str);
 			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
@@ -357,64 +377,82 @@ static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
 			ox_json_object_get_int(r->pool, j_clientinfo, "client_secret_expires_at", &expires_at, 0);
 			ox_json_object_get_int(r->pool, j_clientinfo, "client_id_issued_at", &issued_at, 0);
 
+			// save client info into file system
+			if (c->provider.client_credit_path != NULL)
+				json_dump_file(j_clientinfo, c->provider.client_credit_path, JSON_ENCODE_ANY);
+			json_decref(j_clientinfo);
+
+			// obtain pat
+			char *user_id = "";//"admin";
+			char *user_secret = "";//"rootroot";
+			oxd_obtain_pat(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
+				c->provider.openid_provider, c->provider.uma_auth_server, c->redirect_uri, 
+				c->provider.client_id, c->provider.client_secret, user_id, user_secret, resp_str);
+			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+				return FALSE;
+			if (c->provider.pat_token == NULL)
+				ox_json_object_get_string(r->pool, j_clientinfo, "pat_token", &c->provider.pat_token, NULL);
+			json_decref(j_clientinfo);
+
+			// register resource
+			oxd_register_resource(c->provider.oxd_hostaddr, c->provider.oxd_portnum, c->provider.uma_auth_server, 
+				c->provider.pat_token, c->provider.uma_resource_name, c->provider.uma_scope, resp_str);
+			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+				return FALSE;
+			if (c->provider.uma_resource_id == NULL)
+				ox_json_object_get_string(r->pool, j_clientinfo, "_id", &c->provider.uma_resource_id, NULL);
+			json_decref(j_clientinfo);
+
+			// obtain aat
+			oxd_obtain_aat(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+				c->provider.openid_provider, c->provider.uma_auth_server, c->redirect_uri, 
+				c->provider.client_id, c->provider.client_secret, user_id, user_secret, resp_str);
+			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+				return FALSE;
+			if (c->provider.aat_token == NULL)
+				ox_json_object_get_string(r->pool, j_clientinfo, "aat_token", &c->provider.aat_token, NULL);
+			json_decref(j_clientinfo);
+
+			// obtain rpt
+			if (c->provider.uma_amhost == NULL)
+				c->provider.uma_amhost = c->provider.uma_auth_server;
+			oxd_obtain_rpt(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
+				c->provider.aat_token, c->provider.uma_amhost, resp_str);
+			if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+				return FALSE;
+			if (c->provider.rpt_token == NULL)
+				ox_json_object_get_string(r->pool, j_clientinfo, "rpt_token", &c->provider.rpt_token, NULL);
+			json_decref(j_clientinfo);
+
 			/* save client_id and client_secret into memcache */
 			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_id_key, c->provider.client_id, 
 				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
 			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, c->provider.client_secret, 
 				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
-			if (c->provider.client_credit_path != NULL)
-				json_dump_file(j_clientinfo, c->provider.client_credit_path, JSON_ENCODE_ANY);
-			json_decref(j_clientinfo);
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, pat_token, c->provider.pat_token, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, uma_resource_id, c->provider.uma_resource_id, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, aat_token, c->provider.aat_token, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, rpt_token, c->provider.rpt_token, 
+				apr_time_now() + apr_time_from_sec(expires_at-issued_at));
 		}
 		else
 		{
 			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_id_key, c->provider.client_id, 
 				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
-			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key,	c->provider.client_secret,	
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, client_secret_key, c->provider.client_secret,	
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, pat_token, c->provider.pat_token, 
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, uma_resource_id, c->provider.uma_resource_id, 
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, aat_token, c->provider.aat_token, 
+				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+			c->cache->set(r, OX_CACHE_SECTION_PROVIDER, rpt_token, c->provider.rpt_token, 
 				apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
 		}
-
-		// obtain pat
-		char *user_id = "";//"admin";
-		char *user_secret = "";//"rootroot";
-		oxd_obtain_pat(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
-			c->provider.openid_provider, c->provider.uma_auth_server, c->redirect_uri, 
-			c->provider.client_id, c->provider.client_secret, user_id, user_secret, resp_str);
-		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
-			return FALSE;
-		if (c->provider.pat_token == NULL)
-			ox_json_object_get_string(r->pool, j_clientinfo, "pat_token", &c->provider.pat_token, NULL);
-		json_decref(j_clientinfo);
-
-		// register resource
-		oxd_register_resource(c->provider.oxd_hostaddr, c->provider.oxd_portnum, c->provider.uma_auth_server, 
-			c->provider.pat_token, c->provider.uma_resource_name, c->provider.uma_scope, resp_str);
-		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
-			return FALSE;
-		if (c->provider.uma_resource_id == NULL)
-			ox_json_object_get_string(r->pool, j_clientinfo, "_id", &c->provider.uma_resource_id, NULL);
-		json_decref(j_clientinfo);
-
-		// obtain aat
-		oxd_obtain_aat(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
-			c->provider.openid_provider, c->provider.uma_auth_server, c->redirect_uri, 
-			c->provider.client_id, c->provider.client_secret, user_id, user_secret, resp_str);
-		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
-			return FALSE;
-		if (c->provider.aat_token == NULL)
-			ox_json_object_get_string(r->pool, j_clientinfo, "aat_token", &c->provider.aat_token, NULL);
-		json_decref(j_clientinfo);
-
-		// obtain rpt
-		if (c->provider.uma_amhost == NULL)
-			c->provider.uma_amhost = c->provider.uma_auth_server;
-		oxd_obtain_rpt(c->provider.oxd_hostaddr, c->provider.oxd_portnum, 
-			c->provider.aat_token, c->provider.uma_amhost, resp_str);
-		if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
-			return FALSE;
-		if (c->provider.rpt_token == NULL)
-			ox_json_object_get_string(r->pool, j_clientinfo, "rpt_token", &c->provider.rpt_token, NULL);
-		json_decref(j_clientinfo);
 	}
 
 	*provider = (ox_provider_t *)apr_pcalloc(r->pool, sizeof(ox_provider_t));
@@ -1461,22 +1499,22 @@ static int ox_handle_uma_authorization_response(request_rec *r, ox_cfg *c,
 	const char *claims = ox_resolve_claims_from_user_info_endpoint(r, c,
 			provider, params);
 
-	/* obtain rpt */
-	{
-		char resp_str[8192];
-		json_t *j_obtainrpt;
-		if (oxd_obtain_rpt(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
-			c->provider.aat_token, c->provider.uma_amhost, resp_str) == FALSE) {
-				return ox_authorization_response_error(r, c, proto_state,
-					"No obtain rpt token.", NULL);
-		}
-		
-		if (ox_util_decode_json_and_check_error(r, resp_str, &j_obtainrpt) == FALSE)
-			return FALSE;
-		ox_json_object_get_string(r->pool, j_obtainrpt, "rpt_token", &c->provider.rpt_token, NULL);
-
-		json_decref(j_obtainrpt);
-	}
+// 	/* obtain rpt */
+// 	{
+// 		char resp_str[8192];
+// 		json_t *j_obtainrpt;
+// 		if (oxd_obtain_rpt(c->provider.oxd_hostaddr, c->provider.oxd_portnum,
+// 			c->provider.aat_token, c->provider.uma_amhost, resp_str) == FALSE) {
+// 				return ox_authorization_response_error(r, c, proto_state,
+// 					"No obtain rpt token.", NULL);
+// 		}
+// 		
+// 		if (ox_util_decode_json_and_check_error(r, resp_str, &j_obtainrpt) == FALSE)
+// 			return FALSE;
+// 		ox_json_object_get_string(r->pool, j_obtainrpt, "rpt_token", &c->provider.rpt_token, NULL);
+// 
+// 		json_decref(j_obtainrpt);
+// 	}
 
 	/* register ticket */
 	{
@@ -2915,6 +2953,24 @@ int ox_check_user_config(request_rec *r, ox_cfg *c)
 		if (c->provider.uma_resource_name == NULL) {
 			return ox_util_html_send_error(r, "mod_auth_ox",
 				"'UMAResourceName' must be set in auth_ox.conf! And, please restart Apache service.",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+
+		if (c->provider.uma_scope == NULL) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"'UMAScope' must be set in auth_ox.conf! And, please restart Apache service.",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+
+		if (c->provider.uma_rshost == NULL) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"'UMARsHost' must be set in auth_ox.conf! And, please restart Apache service.",
+				HTTP_INTERNAL_SERVER_ERROR);
+		}
+
+		if (c->provider.uma_amhost == NULL) {
+			return ox_util_html_send_error(r, "mod_auth_ox",
+				"'UMAAmHost' must be set in auth_ox.conf! And, please restart Apache service.",
 				HTTP_INTERNAL_SERVER_ERROR);
 		}
 	}
