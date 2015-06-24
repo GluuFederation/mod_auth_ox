@@ -78,7 +78,12 @@ test: test-compile
 
 .PHONY:	install
 install: src/mod_auth_ox.la
+ifdef DESTDIR
+	mkdir -p $(DESTDIR)$(APXS2_LIBEXECDIR)
+	@APXS2@ @APXS2_OPTS@ -i -S LIBEXECDIR=$(DESTDIR)$(APXS2_LIBEXECDIR) -n mod_auth_ox src/mod_auth_ox.la
+else
 	@APXS2@ @APXS2_OPTS@ -i -n mod_auth_ox src/mod_auth_ox.la
+endif
 
 .PHONY: distfile
 distfile:	@NAMEVER@.tar.gz
