@@ -215,6 +215,62 @@ int openid_proto_authorization_request(request_rec *r, ox_cfg *c,
 }
 
 /*
+ * send an OpenID Connect authorization request to the specified provider
+ */
+int openid_proto_authorization_code_flow(request_rec *r, ox_cfg *c,
+		struct ox_provider_t *provider, const char *login_hint,	const char *redirect_uri, 
+		const char *state, json_t *proto_state,	const char *id_token_hint, const char *nonce, 
+		const char *requested_acr, const char *auth_request_params) 
+{
+	char resp_str[8192];
+	json_t *j_clientinfo;
+
+	char *id_token, *access_token, *refresh_token, *authorization_code, *scope;
+	int expires_in_seconds;
+
+	/* log some stuff */
+	char *s_value = json_dumps(proto_state, JSON_ENCODE_ANY);
+	ox_debug(r, "enter, issuer=%s, redirect_uri=%s, state=%s, proto_state=%s",
+			provider->issuer, redirect_uri, state, s_value);
+	free(s_value);
+
+	/* get id_token via oxd "authorization_code_flow" request */
+	unsigned char ret = oxd_authorize_code_flow(provider->oxd_hostaddr, provider->oxd_portnum, 
+		provider->openid_provider, redirect_uri, provider->client_id, provider->client_secret, 
+		provider->user_id, provider->user_secret, provider->scope, nonce, requested_acr, resp_str);
+	if (ret == FALSE) return FALSE;
+	if (ox_util_decode_json_and_check_error(r, resp_str, &j_clientinfo) == FALSE)
+		return FALSE;
+	ox_json_object_get_string(r->pool, j_clientinfo, "id_token", &id_token, NULL);
+	ox_json_object_get_string(r->pool, j_clientinfo, "access_token", &access_token, NULL);
+	ox_json_object_get_string(r->pool, j_clientinfo, "refresh_token", &refresh_token, NULL);
+	ox_json_object_get_string(r->pool, j_clientinfo, "authorization_code", &authorization_code, NULL);
+	ox_json_object_get_string(r->pool, j_clientinfo, "scope", &scope, NULL);
+	ox_json_object_get_int(r->pool, j_clientinfo, "expires_in_seconds", &expires_in_seconds, 0);
+	json_decref(j_clientinfo);
+
+	/* assemble the full URL as the authorization request to the OP where we want to redirect to */
+	char *authorization_request = apr_psprintf(r->pool, "%s#", redirect_uri);
+	authorization_request = apr_psprintf(r->pool, "%sscope=%s",	authorization_request, scope);
+	authorization_request = apr_psprintf(r->pool, "%s&state=%s", authorization_request, ox_util_escape_string(r, state));
+	authorization_request = apr_psprintf(r->pool, "%s&expires_in=%d", authorization_request, expires_in_seconds);
+	authorization_request = apr_psprintf(r->pool, "%s&token_type=bearer", authorization_request);
+	authorization_request = apr_psprintf(r->pool, "%s&id_token=%s",	authorization_request, id_token);
+	authorization_request = apr_psprintf(r->pool, "%s&access_token=%s",	authorization_request, access_token);
+
+	/* save the original url */
+	c->cache->set(r, OX_CACHE_SECTION_PROVIDER, state, ox_get_current_url(r, c),
+		apr_time_now() + apr_time_from_sec(OX_CACHE_PROVIDER_METADATA_EXPIRY_DEFAULT));
+
+	/* some more logging */
+	ox_debug(r, "adding outgoing header: Location: %s",
+		authorization_request);
+
+	/* and tell Apache to return an HTTP Redirect (302) message */
+	return HTTP_PERMANENT_REDIRECT;
+}
+
+/*
  * send an UMA authorization request to the specified provider
  */
 int uma_proto_authorization_request(request_rec *r,

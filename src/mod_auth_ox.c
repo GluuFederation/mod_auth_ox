@@ -204,12 +204,6 @@ static apr_byte_t openid_provider_static_config(request_rec *r, ox_cfg *c,
 	json_t *j_provider = NULL;
 	const char *s_json = NULL;
 
-	/* see if we should configure a static provider based on external (cached) metadata */
-// 	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
-// 		*provider = &c->provider;
-// 		return TRUE;
-// 	}
-
 	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.openid_provider,
 			&s_json);
 
@@ -300,12 +294,6 @@ static apr_byte_t uma_provider_static_config(request_rec *r, ox_cfg *c,
 
 	json_t *j_provider = NULL;
 	const char *s_json = NULL;
-
-	/* see if we should configure a static provider based on external (cached) metadata */
-// 	if ((c->metadata_dir != NULL) || (c->provider.metadata_url == NULL)) {
-// 		*provider = &c->provider;
-// 		return TRUE;
-// 	}
 
 	c->cache->get(r, OX_CACHE_SECTION_PROVIDER, c->provider.openid_provider,
 			&s_json);
@@ -2007,9 +1995,18 @@ static int openid_authenticate_user(request_rec *r, ox_cfg *c,
 
 	/* send off to the OpenID Connect Provider */
 	// TODO: maybe show intermediate/progress screen "redirecting to"
-	return openid_proto_authorization_request(r, c, provider, login_hint,
+	if ((c->provider.user_id != NULL) && (c->provider.user_secret != NULL))
+	{
+		return openid_proto_authorization_code_flow(r, c, provider, login_hint,
+			c->redirect_uri, state, proto_state, id_token_hint, nonce,
+			c->provider.requested_acr, auth_request_params);
+	} 
+	else
+	{
+		return openid_proto_authorization_request(r, c, provider, login_hint,
 			c->redirect_uri, state, proto_state, id_token_hint,
 			c->provider.requested_acr, auth_request_params);
+	}
 }
 
 /*
@@ -2190,99 +2187,6 @@ static int ox_target_link_uri_matches_configuration(request_rec *r,
 		}
 	}
 	return TRUE;
-}
-
-/*
- * handle a response from an IDP discovery page and/or handle 3rd-party initiated SSO
- */
-static int ox_handle_discovery_response(request_rec *r, ox_cfg *c) {
-
-	/* variables to hold the values returned in the response */
-	char *issuer = NULL, *target_link_uri = NULL, *login_hint = NULL,
-			*auth_request_params = NULL;
-	ox_provider_t *provider = NULL;
-
-	ox_util_get_request_parameter(r, OX_DISC_OP_PARAM, &issuer);
-	ox_util_get_request_parameter(r, OX_DISC_RT_PARAM, &target_link_uri);
-	ox_util_get_request_parameter(r, OX_DISC_LH_PARAM, &login_hint);
-	ox_util_get_request_parameter(r, OX_DISC_AR_PARAM,
-			&auth_request_params);
-
-	// TODO: trim issuer/accountname/domain input and do more input validation
-
-	ox_debug(r, "issuer=\"%s\", target_link_uri=\"%s\", login_hint=\"%s\"",
-			issuer, target_link_uri, login_hint);
-
-	if (issuer == NULL) {
-		return ox_util_html_send_error(r, "mod_auth_ox",
-				"Wherever you came from, it sent you here with the wrong parameters...",
-				HTTP_INTERNAL_SERVER_ERROR);
-	}
-
-	if (target_link_uri == NULL) {
-		if (c->default_sso_url == NULL) {
-			return ox_util_html_send_error(r, "mod_auth_ox",
-					"SSO to this module without specifying a \"target_link_uri\" parameter is not possible because OXDefaultURL is not set.",
-					HTTP_INTERNAL_SERVER_ERROR);
-		}
-		target_link_uri = c->default_sso_url;
-	}
-
-	/* do open redirect prevention */
-	if (ox_target_link_uri_matches_configuration(r, c,
-			target_link_uri) == FALSE) {
-		return ox_util_html_send_error(r, "mod_auth_ox",
-				"\"target_link_uri\" parameter does not match configuration settings, aborting to prevent an open redirect.",
-				HTTP_UNAUTHORIZED);
-	}
-
-	/* find out if the user entered an account name or selected an OP manually */
-	if (strstr(issuer, "@") != NULL) {
-
-		if (login_hint == NULL) {
-			login_hint = apr_pstrdup(r->pool, issuer);
-			//char *p = strstr(issuer, "@");
-			//*p = '\0';
-		}
-
-		/* got an account name as input, perform OP discovery with that */
-		if (ox_proto_account_based_discovery(r, c, issuer, &issuer) == FALSE) {
-
-			/* something did not work out, show a user facing error */
-			return ox_util_html_send_error(r, "mod_auth_ox",
-					"could not resolve the provided account name to an OpenID Connect provider; check your syntax",
-					HTTP_NOT_FOUND);
-		}
-
-		/* issuer is set now, so let's continue as planned */
-
-	} else if (apr_strnatcmp(issuer, "accounts.google.com") != 0) {
-
-		/* allow issuer/domain entries that don't start with https */
-		issuer = apr_psprintf(r->pool, "%s",
-				((strstr(issuer, "http://") == issuer)
-						|| (strstr(issuer, "https://") == issuer)) ?
-						issuer : apr_psprintf(r->pool, "https://%s", issuer));
-	}
-
-	/* strip trailing '/' */
-	int n = (int)strlen(issuer);
-	if (issuer[n - 1] == '/')
-		issuer[n - 1] = '\0';
-
-	/* try and get metadata from the metadata directories for the selected OP */
-	if ((ox_metadata_get(r, c, issuer, &provider) == TRUE)
-			&& (provider != NULL)) {
-
-		/* now we've got a selected OP, send the user there to authenticate */
-		return openid_authenticate_user(r, c, provider, target_link_uri,
-				login_hint, NULL, NULL, auth_request_params);
-	}
-
-	/* something went wrong */
-	return ox_util_html_send_error(r, "mod_auth_ox",
-			"Could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator",
-			HTTP_NOT_FOUND);
 }
 
 static apr_uint32_t ox_transparent_pixel[17] = {
@@ -2714,11 +2618,6 @@ int ox_handle_redirect_uri_request(request_rec *r, ox_cfg *c,
 		/* this is an authorization response using the fragment(+POST) response_mode with the Implicit Client profile */
 		return ox_handle_post_authorization_response(r, c, session);
 
-	} else if (ox_is_discovery_response(r, c)) {
-
-		/* this is response from the OP discovery page */
-		return ox_handle_discovery_response(r, c);
-
 	} else if (ox_util_request_has_parameter(r, "logout")) {
 
 		/* handle logout */
@@ -2781,11 +2680,6 @@ int uma_handle_redirect_uri_request(request_rec *r, ox_cfg *c,
 
 		/* this is an authorization response using the fragment(+POST) response_mode with the Implicit Client profile */
 		return ox_handle_post_authorization_response(r, c, session);
-
-	} else if (ox_is_discovery_response(r, c)) {
-
-		/* this is response from the OP discovery page */
-		return ox_handle_discovery_response(r, c);
 
 	} else if (ox_util_request_has_parameter(r, "logout")) {
 

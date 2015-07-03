@@ -809,4 +809,86 @@ error:
 	return FALSE;
 }
 
+apr_byte_t oxd_authorize_code_flow(const char *hostname, int portnum, const char *discovery_url, \
+				const char *redirect_url, const char *client_id, const char *client_secret, \
+				const char *user_id, const char *user_secret, const char *scope, \
+				const char *nonce, const char *acr,	char *result)
+{
+	apr_status_t rv;
+	apr_pool_t *mp;
+	apr_socket_t *s;
+	char req[BUFSIZE]="";
+	char resp[BUFSIZE]="";
 
+	if ((discovery_url == NULL) || (redirect_url == NULL) || 
+		(client_id == NULL) || (client_secret == NULL) || 
+		(user_id == NULL) || (user_secret == NULL) || 
+		(scope == NULL) || (nonce == NULL) || (portnum < 0)) {
+			return -1;
+	}
+
+	apr_initialize();
+	apr_pool_create(&mp, NULL);
+
+	rv = do_connect(&s, mp, hostname, portnum);
+	if (rv != APR_SUCCESS) {
+		goto error;
+	}
+
+	strcat(req, "    ");
+	strcat(&req[4], "{\"command\":\"authorization_code_flow\",\"params\":{\"discovery_url\":\"");
+	strcat(req, "https://");
+	strcat(req, discovery_url);
+	strcat(req, "/.well-known/openid-configuration");
+	strcat(req, "\",\"redirect_url\":\"");
+	strcat(req, redirect_url);
+	strcat(req, "\",\"client_id\":\"");
+	strcat(req, client_id);
+	strcat(req, "\",\"client_secret\":\"");
+	strcat(req, client_secret);
+	strcat(req, "\",\"user_id\":\"");
+	strcat(req, user_id);
+	strcat(req, "\",\"user_secret\":\"");
+	strcat(req, user_secret);
+	strcat(req, "\",\"scope\":\"");
+	strcat(req, scope);
+	strcat(req, "\",\"nonce\":\"");
+	strcat(req, nonce);
+	if (acr) {
+		strcat(req, "\",\"acr\":\"");
+		strcat(req, acr);
+		strcat(req, "\"");
+	} else {
+		strcat(req, "\",\"acr\":null");
+	}
+	strcat(req, "}}");
+	sprintf(&req[0], "%04lu", strlen(req)-4);
+	req[4] = '{';
+
+	rv = do_client_task(s, req, resp);
+	if (rv != APR_SUCCESS) {
+		goto error;
+	}
+	apr_socket_close(s);
+
+	if (strncmp(&resp[4], "{\"status\":\"ok\"", 14) != 0) {
+		goto error;
+	}
+
+	resp[strlen(resp)-1] = 0;
+	memcpy(result, &resp[26], strlen(&resp[26]));
+	result[strlen(&resp[26])] = 0;
+
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
+	apr_terminate();
+	return TRUE;
+
+error:
+	/* destroy the memory pool. These chunks above are freed by this */
+	apr_pool_destroy(mp);
+
+	apr_terminate();
+	return FALSE;
+}

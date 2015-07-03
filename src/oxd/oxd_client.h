@@ -39,5 +39,6 @@ apr_byte_t oxd_check_rpt_status(const char *hostname, int portnum, const char *u
 apr_byte_t oxd_check_rpt_token(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *rpt_token, char *result);
 apr_byte_t oxd_register_ticket(const char *hostname, int portnum, const char *uma_discovery_url, const char *pat_token, const char *am_host, const char *rs_host,  const char *scopes, const char *resource_set_id, char *result);
 apr_byte_t oxd_authorize_rpt_token(const char *hostname, int portnum, const char *aat_token, const char *rpt_token, const char *am_host, const char *ticket, const char *claims, char *result);
+apr_byte_t oxd_authorize_code_flow(const char *hostname, int portnum, const char *discovery_url, const char *redirect_url, const char *client_id, const char *client_secret, const char *user_id, const char *user_secret, const char *scope, const char *nonce, const char *acr, char *result);
 
 #endif

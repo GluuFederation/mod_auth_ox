@@ -724,7 +724,6 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->public_keys = NULL;
 	c->private_keys = NULL;
 
-	c->provider.metadata_url = NULL;
 	c->provider.issuer = NULL;
 	c->provider.authorization_endpoint_url = NULL;
 	c->provider.token_endpoint_url = NULL;
@@ -744,6 +743,8 @@ void *ox_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.client_contact = NULL;
 	c->provider.registration_token = NULL;
 	c->provider.scope = OX_DEFAULT_SCOPE;
+	c->provider.user_id = NULL;
+	c->provider.user_secret = NULL;
 	c->provider.response_type = OX_DEFAULT_RESPONSE_TYPE;
 	c->provider.response_mode = NULL;
 	c->provider.jwks_refresh_interval = OX_DEFAULT_JWKS_REFRESH_INTERVAL;
@@ -860,9 +861,6 @@ void *ox_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->private_keys =
 			add->private_keys != NULL ? add->private_keys : base->private_keys;
 
-	c->provider.metadata_url =
-			add->provider.metadata_url != NULL ?
-					add->provider.metadata_url : base->provider.metadata_url;
 	c->provider.issuer =
 			add->provider.issuer != NULL ?
 					add->provider.issuer : base->provider.issuer;
@@ -895,6 +893,12 @@ void *ox_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->provider.client_secret =
 			add->provider.client_secret != NULL ?
 					add->provider.client_secret : base->provider.client_secret;
+	c->provider.user_id =
+			add->provider.user_id != NULL ?
+					add->provider.user_id : base->provider.user_id;
+	c->provider.user_secret =
+			add->provider.user_secret != NULL ?
+					add->provider.user_secret : base->provider.user_secret;
 	c->provider.registration_endpoint_url =
 			add->provider.registration_endpoint_url != NULL ?
 					add->provider.registration_endpoint_url :
@@ -1249,77 +1253,6 @@ static int ox_check_config_error(server_rec *s, const char *config_str) {
  * check the config required for the OpenID Connect RP role
  */
 static int ox_check_config_openid_ox(server_rec *s, ox_cfg *c) {
-
-//	apr_uri_t r_uri;
-
-// 	if ((c->provider.openid_provider == NULL) && (c->provider.uma_auth_server == NULL)) {
-// 		ox_serror(s, "'OXOpenIDProvider or UMAAuthorizationServer' must be set");
-// 		return HTTP_INTERNAL_SERVER_ERROR;
-// 	}
-	
-// 	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)
-// 			&& (c->provider.metadata_url == NULL)) {
-// 		ox_serror(s,
-// 				"one of 'OXProviderIssuer', 'OXProviderMetadataURL' or 'OXMetadataDir' must be set");
-// 		return HTTP_INTERNAL_SERVER_ERROR;
-// 	}
-
-// 	if (c->redirect_uri == NULL)
-// 		return ox_check_config_error(s, "OXRedirectURI");
-// 	if (c->crypto_passphrase == NULL)
-// 		return ox_check_config_error(s, "OXCryptoPassphrase");
-
-// 	if (c->metadata_dir == NULL) {
-// 		if (c->provider.metadata_url == NULL) {
-// 			if (c->provider.issuer == NULL)
-// 				return ox_check_config_error(s, "OXProviderIssuer");
-// 			if (c->provider.authorization_endpoint_url == NULL)
-// 				return ox_check_config_error(s,
-// 						"OXProviderAuthorizationEndpoint");
-// 			// TODO: this depends on the configured OXResponseType now
-// 			//			if (c->provider.token_endpoint_url == NULL)
-// 			//				return ox_check_config_error(s, "OXProviderTokenEndpoint");
-// 		} else {
-// 			apr_uri_parse(s->process->pconf, c->provider.metadata_url, &r_uri);
-// 			if (apr_strnatcmp(r_uri.scheme, "http") == 0) {
-// 				ox_swarn(s,
-// 						"the URL scheme (%s) of the configured OXProviderMetadataURL SHOULD be \"https\" for security reasons!",
-// 						r_uri.scheme);
-// 			}
-// 		}
-// // 		if (c->provider.client_id == NULL)
-// // 			return ox_check_config_error(s, "OXClientID");
-// // 		// TODO: this depends on the configured OXResponseType now
-// // 		if (c->provider.client_secret == NULL)
-// // 			return ox_check_config_error(s, "OXClientSecret");
-// 	} else {
-// 		if (c->provider.metadata_url != NULL) {
-// 			ox_serror(s,
-// 					"only one of 'OXProviderMetadataURL' or 'OXMetadataDir' should be set");
-// 			return HTTP_INTERNAL_SERVER_ERROR;
-// 		}
-// 	}
-
-// 	if (c->redirect_uri != NULL)
-// 	{
-// 		apr_uri_parse(s->process->pconf, c->redirect_uri, &r_uri);
-// 		if (apr_strnatcmp(r_uri.scheme, "https") != 0) {
-// 			ox_swarn(s,
-// 				"the URL scheme (%s) of the configured OXRedirectURI SHOULD be \"https\" for security reasons (moreover: some Providers may reject non-HTTPS URLs)",
-// 				r_uri.scheme);
-// 		}
-// 	}
-	
-// 	if (c->cookie_domain != NULL) {
-// 		char *p = strstr(r_uri.hostname, c->cookie_domain);
-// 		if ((p == NULL) || (apr_strnatcmp(c->cookie_domain, p) != 0)) {
-// 			ox_serror(s,
-// 					"the domain (%s) configured in OXCookieDomain does not match the URL hostname (%s) of the configured OXRedirectURI (%s): setting \"state\" and \"session\" cookies will not work!",
-// 					c->cookie_domain, r_uri.hostname, c->redirect_uri);
-// 			return HTTP_INTERNAL_SERVER_ERROR;
-// 		}
-// 	}
-
 	return OK;
 }
 
@@ -1360,7 +1293,6 @@ static int ox_config_check_vhost_config(apr_pool_t *pool, server_rec *s) {
 	ox_sdebug(s, "enter");
 
 	if ((cfg->metadata_dir != NULL) || (cfg->provider.issuer != NULL)
-			|| (cfg->provider.metadata_url != NULL)
 			|| (cfg->redirect_uri != NULL)
 			|| (cfg->crypto_passphrase != NULL)) {
 		if (ox_check_config_openid_ox(s, cfg) != OK)
@@ -1605,10 +1537,6 @@ void ox_register_hooks(apr_pool_t *pool) {
 #ifdef WIN32
 command_rec ox_config_cmds[] = {
 
-		AP_INIT_TAKE1("OXProviderMetadataURL", (cmd_func)ox_set_string_slot,
-			(void*)APR_OFFSETOF(ox_cfg, provider.metadata_url),
-			RSRC_CONF,
-			"OpenID Connect OP configuration metadata URL."),
 		AP_INIT_TAKE1("OXProviderIssuer", (cmd_func)ox_set_string_slot,
 			(void*)APR_OFFSETOF(ox_cfg, provider.issuer),
 			RSRC_CONF,
@@ -1658,6 +1586,14 @@ command_rec ox_config_cmds[] = {
 			(void *)APR_OFFSETOF(ox_cfg, provider.jwks_uri),
 			RSRC_CONF,
 			"Define the OpenID OP JWKS URL (e.g.: https://localhost:9031/pf/JWKS)"),
+		AP_INIT_TAKE1("OXUserId", (cmd_func)ox_set_string_slot,
+			(void *)APR_OFFSETOF(ox_cfg, provider.user_id),
+			RSRC_CONF,
+			"User Id for OpenID Connect"),
+		AP_INIT_TAKE1("OXUserSecret", (cmd_func)ox_set_string_slot,
+			(void *)APR_OFFSETOF(ox_cfg, provider.user_secret),
+			RSRC_CONF,
+			"User Secret for OpenID Connect"),
 		AP_INIT_TAKE1("OXResponseType",
 			(cmd_func)ox_set_response_type,
 			(void *)APR_OFFSETOF(ox_cfg, provider.response_type),
@@ -2026,10 +1962,6 @@ command_rec ox_config_cmds[] = {
 #else
 command_rec ox_config_cmds[] = {
 
-		AP_INIT_TAKE1("OXProviderMetadataURL", ox_set_string_slot,
-				(void*)APR_OFFSETOF(ox_cfg, provider.metadata_url),
-				RSRC_CONF,
-				"OpenID Connect OP configuration metadata URL."),
 		AP_INIT_TAKE1("OXProviderIssuer", ox_set_string_slot,
 				(void*)APR_OFFSETOF(ox_cfg, provider.issuer),
 				RSRC_CONF,
@@ -2079,6 +2011,14 @@ command_rec ox_config_cmds[] = {
 				(void *)APR_OFFSETOF(ox_cfg, provider.jwks_uri),
 				RSRC_CONF,
 				"Define the OpenID OP JWKS URL (e.g.: https://localhost:9031/pf/JWKS)"),
+		AP_INIT_TAKE1("OXUserId", (cmd_func)ox_set_string_slot,
+				(void *)APR_OFFSETOF(ox_cfg, provider.user_id),
+				RSRC_CONF,
+				"User Id for OpenID Connect"),
+		AP_INIT_TAKE1("OXUserSecret", (cmd_func)ox_set_string_slot,
+				(void *)APR_OFFSETOF(ox_cfg, provider.user_secret),
+				RSRC_CONF,
+				"User Secret for OpenID Connect"),
 		AP_INIT_TAKE1("OXResponseType",
 				ox_set_response_type,
 				(void *)APR_OFFSETOF(ox_cfg, provider.response_type),

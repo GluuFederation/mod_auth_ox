@@ -189,7 +189,6 @@ typedef struct ox_jwks_uri_t {
 } ox_jwks_uri_t;
 
 typedef struct ox_provider_t {
-	char *metadata_url;
 	char *issuer;
 	char *authorization_endpoint_url;
 	char *token_endpoint_url;
@@ -210,6 +209,8 @@ typedef struct ox_provider_t {
 	char *registration_token;
 	char *registration_endpoint_json;
 	char *scope;
+	char *user_id;
+	char *user_secret;
 	char *response_type;
 	char *response_mode;
 	int jwks_refresh_interval;
@@ -363,6 +364,7 @@ int ox_oauth_check_userid(request_rec *r, ox_cfg *c);
 // ox_proto.c
 
 int openid_proto_authorization_request(request_rec *r, ox_cfg *cfg, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *requested_acr, const char *auth_request_params);
+int openid_proto_authorization_code_flow(request_rec *r, ox_cfg *cfg, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *nonce, const char *requested_acr, const char *auth_request_params);
 int uma_proto_authorization_request(request_rec *r, struct ox_provider_t *provider, const char *login_hint, const char *redirect_uri, const char *state, json_t *proto_state, const char *id_token_hint, const char *requested_acr, const char *auth_request_params);
 apr_byte_t ox_proto_is_post_authorization_response(request_rec *r, ox_cfg *cfg);
 apr_byte_t ox_proto_is_redirect_authorization_response(request_rec *r, ox_cfg *cfg);
